@@ -1,111 +1,103 @@
-import { useCallback, useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router';
+import { AuthProvider, useAuth } from './auth/AuthContext';
+import Login from './screens/Login';
+import Setup from './screens/Setup';
+import Home from './screens/Home';
+import Account from './screens/Account';
 
 /*
- * Step 1's only screen, and it exists to prove exactly one thing: that this
- * app can reach the API THROUGH THE VITE PROXY.
+ * Auth gates the whole shell rather than living behind a /login route.
  *
- * The content-type check is the point. When the proxy is not configured, the
- * dev server does not 404 — it serves index.html with a 200, because that is
- * what an SPA fallback does. Calling .json() on that throws
- * "Unexpected token '<'", which names nothing useful and sends people looking
- * at the API, at CORS, at the database.
- *
- * SiteSilo learned this the hard way and wrote an essay about it in
- * admin/src/auth/AuthContext.jsx. Proving the proxy now, while there is
- * nothing else in the system to blame, means it never has to be diagnosed
- * again with real code around it.
- *
- * Step 3 replaces this file with the real shell. The probe logic moves into
- * AuthContext, where it becomes the checking / ready / unreachable state
- * machine.
+ * Gating before the router means the URL survives signing in — land on
+ * /patients/42, sign in, and you are still on /patients/42 rather than bounced
+ * to a dashboard. It also means there is no redirect logic at all. The
+ * trade-off is that the login screen has no address of its own, which for a
+ * staff application nobody deep-links into is a non-issue.
  */
+function Shell() {
+  const { user, hospital, checking, needsSetup, unreachable, reason, retry, logout } = useAuth();
 
-async function probe() {
-  const res = await fetch('/api/health');
+  // Prevents a flash of the login card on every page load while /me is in
+  // flight.
+  if (checking) {
+    return <div className="gate"><p className="gate__wait">Loading…</p></div>;
+  }
 
-  const type = res.headers.get('content-type') ?? '';
-  if (!type.includes('application/json')) {
-    throw new Error(
-      `The API returned ${type || 'no content type'} instead of JSON. ` +
-      'The dev server is most likely not proxying /api — check the server.proxy ' +
-      'block in app/vite.config.js, and that the API is running on port 3000.'
+  /*
+   * The API could not be reached, or answered something that makes no sense.
+   *
+   * This must not fall through to the login form. A dead API rendered as a
+   * login screen looks like a working install rejecting your password, so
+   * people try other passwords instead of checking the server.
+   */
+  if (unreachable) {
+    return (
+      <div className="gate">
+        <div className="gate__card">
+          <h1 className="gate__title">Can’t reach the API</h1>
+          <p className="gate__lede">{reason}</p>
+          <button className="btn btn--primary" type="button" onClick={retry}>
+            Try again
+          </button>
+          <p className="gate__foot">
+            The app already retried three times before showing this, so a
+            transient start-up delay has been ruled out.
+          </p>
+        </div>
+      </div>
     );
   }
 
-  if (!res.ok) {
-    throw new Error(
-      `The API answered ${res.status} on /api/health, which should not happen ` +
-      'on a healthy install.'
-    );
-  }
+  // A hospital with no accounts. Offering a login form nobody can satisfy would
+  // be a dead end.
+  if (!user && needsSetup) return <Setup />;
 
-  return res.json();
+  if (!user) return <Login />;
+
+  return (
+    <BrowserRouter basename="/app">
+      <div className="shell">
+        <aside className="sidebar">
+          <div className="sidebar__brand">
+            <span className="sidebar__hospital">{hospital}</span>
+            <span className="sidebar__system">Hospital Management System</span>
+          </div>
+
+          <nav className="sidebar__nav" aria-label="Sections">
+            <span className="sidebar__label">Clinical</span>
+            <NavLink to="/">Home</NavLink>
+            {/* Patients, Appointments and the rest attach here as their
+                modules land. Milestone 05 adds the first. */}
+
+            <span className="sidebar__label">Settings</span>
+            <NavLink to="/account">Account</NavLink>
+          </nav>
+
+          <div className="sidebar__foot">
+            <span className="sidebar__who">{user.name || user.email}</span>
+            <span className="sidebar__role">{user.role}</span>
+            <button className="btn btn--quiet" type="button" onClick={logout}>
+              Sign out
+            </button>
+          </div>
+        </aside>
+
+        <main className="main">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/account" element={<Account />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
+  );
 }
 
 export default function App() {
-  const [state, setState] = useState({ status: 'checking' });
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let alive = true;
-
-    probe()
-      .then(data => { if (alive) setState({ status: 'ready', data }); })
-      .catch(err => {
-        if (alive) {
-          setState({
-            status: 'failed',
-            reason: err.message || 'Could not reach the API at all. Start it with ' +
-              'npm run dev in the api folder, and confirm it is listening on port 3000.'
-          });
-        }
-      });
-
-    return () => { alive = false; };
-  }, [attempt]);
-
-  const retry = useCallback(() => {
-    setState({ status: 'checking' });
-    setAttempt(n => n + 1);
-  }, []);
-
   return (
-    <main className="shell">
-      <header className="shell__head">
-        <p className="eyebrow">Hospital Management System</p>
-        <h1>Step 1 — scaffold</h1>
-        <p className="sub">
-          No modules yet. This screen exists to confirm the app, the API and the
-          dev proxy are talking to each other.
-        </p>
-      </header>
-
-      {state.status === 'checking' && (
-        <p className="status status--wait">Checking the API…</p>
-      )}
-
-      {state.status === 'failed' && (
-        <section className="status status--bad">
-          <h2>Can’t reach the API</h2>
-          <p>{state.reason}</p>
-          <button type="button" onClick={retry}>Try again</button>
-        </section>
-      )}
-
-      {state.status === 'ready' && (
-        <section className="status status--ok">
-          <h2>API reachable through the proxy</h2>
-          <dl>
-            <div><dt>Status</dt><dd>{state.data.status}</dd></div>
-            <div><dt>Environment</dt><dd>{state.data.env}</dd></div>
-            <div><dt>Node</dt><dd>{state.data.node}</dd></div>
-            <div><dt>Uptime</dt><dd>{Math.round(state.data.uptime)}s</dd></div>
-            <div><dt>Commit</dt><dd>{state.data.commit ?? 'not set (deploy.sh sets this)'}</dd></div>
-            <div><dt>Migrations</dt><dd>{state.data.migrations ?? 'not reported yet (step 2)'}</dd></div>
-          </dl>
-          <button type="button" onClick={retry}>Check again</button>
-        </section>
-      )}
-    </main>
+    <AuthProvider>
+      <Shell />
+    </AuthProvider>
   );
 }

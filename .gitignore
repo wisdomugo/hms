@@ -1,4 +1,5 @@
 node_modules/
+docs/_generator/node_modules/
 dist/
 generated/
 

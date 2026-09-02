@@ -13,13 +13,11 @@
  *                   same server as the control plane — a hospital running on
  *                   its own infrastructure, for instance.
  *
- * Four steps: create the database, apply every migration to it, register it in
- * the control plane, then mark it active. It refuses rather than half-repeating
- * if anything already exists.
- *
- * This is the command that replaces creating a database by hand. Milestone 01's
- * hms_dev was the last one made manually.
+ * Five steps: create the database, apply every migration to it, register it,
+ * mark it active, and print its single-use setup token. It refuses rather than
+ * half-repeating if anything already exists.
  */
+import { randomBytes } from 'node:crypto';
 import { control } from '../lib/control-plane.js';
 import {
   runPrisma, requireControlUrl, withDatabase, dbNameFor,
@@ -107,9 +105,6 @@ if (exists.length > 0) {
 //
 // `migrate deploy`, never `migrate dev`: deploy only applies migrations that
 // already exist and can never reset anything.
-//
-// At milestone 02 there are no tenant migrations yet, so prisma reports that it
-// found none and exits 0. That is the correct outcome, not a failure.
 // ---------------------------------------------------------------------------
 console.log(`▸ applying migrations\n`);
 const code = await runPrisma(['migrate', 'deploy', '--schema', 'prisma/schema.prisma'], databaseUrl);
@@ -128,12 +123,20 @@ if (code !== 0) {
 // Created as "onboarding" and flipped to "active" only once everything above
 // has succeeded. In between, resolveTenant answers 503 with a clear message
 // rather than letting anyone into a half-built installation.
+//
+// THE SETUP TOKEN is generated here and printed once. It authorises creating
+// this hospital's first account, and nothing else. It is single-use and scoped
+// to this hospital — which is why it lives in the control plane rather than in
+// .env, where one token would cover every hospital on the server.
 // ---------------------------------------------------------------------------
+const setupToken = randomBytes(24).toString('hex');
+
 const tenant = await control.tenant.create({
   data: {
     slug,
     name,
     databaseUrl,
+    setupToken,
     status: 'onboarding',
     hostnames: { create: hostnames.map(hostname => ({ hostname })) }
   }
@@ -145,7 +148,14 @@ await control.tenant.update({
 });
 
 console.log(`\n✓ ${name} is active.\n`);
-console.log('  Reach it by hostname, or in development by either of:');
+console.log('  ┌─ SETUP TOKEN ' + '─'.repeat(52));
+console.log(`  │  ${setupToken}`);
+console.log('  └' + '─'.repeat(66));
+console.log('\n  Shown once, and only here. It authorises creating this');
+console.log('  hospital\'s first account, then it is spent.');
+console.log('  Lost it? Onboarding is the only thing that issues one — clear');
+console.log(`  the row and start again, or set it by hand in the control plane.\n`);
+console.log('  Reach this hospital by hostname, or in development by either of:');
 console.log(`    DEFAULT_TENANT=${slug}     in api/.env`);
 console.log(`    X-Tenant: ${slug}          as a request header\n`);
 console.log('  Resolution is cached for up to a minute, so a running API may');

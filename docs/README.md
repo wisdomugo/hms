@@ -10,9 +10,13 @@ way, how to reproduce it from scratch, and what went wrong on the way. Named
 |---|---|---|
 | 01 | Scaffold, shared library and verified plumbing | Complete — 2 Sep 2026 |
 | 02 | The tenant seam: control plane, per-hospital databases, fleet scripts | Complete — 2 Sep 2026 |
-| 03 | Authentication end to end | Next |
-| 04 | Roles, permissions and the audit log | |
+| 03 | Authentication end to end | Complete — 2 Sep 2026 |
+| 04 | Roles, permissions and the audit log | Next |
 | 05 | `add_patients` — Module 01, Patient Registration | |
+
+The guides are generated, not hand-formatted — see `_generator/`. From 03
+onward each has a source file there, so a guide can be corrected and
+regenerated rather than edited in Word.
 
 The "what went wrong" sections are the point. A milestone that records only
 what worked is a description; one that records the version drift in

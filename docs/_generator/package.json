@@ -1,0 +1,17 @@
+{
+  "name": "hms-guides",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generator for the HMS developer guides. Separate from the API and app on purpose — it is documentation tooling, not part of the system.",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "guide": "node",
+    "all": "node guide-01.cjs && node guide-02.cjs && node guide-03.cjs"
+  },
+  "comment": "The `all` script only works for guides whose source file exists here. Guides 01 and 02 were written before this generator, and their .docx files are committed — they do not need regenerating.",
+  "dependencies": {
+    "docx": "^9.5.1"
+  }
+}

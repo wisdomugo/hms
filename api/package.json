@@ -13,7 +13,8 @@
     "control:migrate": "node scripts/control-migrate.mjs",
     "control:generate": "prisma generate --schema prisma/control/schema.prisma",
     "onboard": "node scripts/onboard.mjs",
-    "migrate:all": "node scripts/migrate-all.mjs"
+    "migrate:all": "node scripts/migrate-all.mjs",
+    "generate": "prisma generate --schema prisma/schema.prisma && prisma generate --schema prisma/control/schema.prisma"
   },
   "author": "Wisdom Nukas",
   "license": "UNLICENSED",

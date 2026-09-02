@@ -9,14 +9,13 @@ import { storage } from './lib/storage/index.js';
 import { resolveTenant, appliedMigrationCount } from './lib/tenancy.js';
 import { controlPlaneStatus } from './lib/control-plane.js';
 
+import authRouter from './modules/auth/routes.js';
+
 /*
- * MILESTONE 02 — the shell plus the tenant seam.
+ * MILESTONE 03 — the shell, the tenant seam, and authentication.
  *
- * Still no domain routers. What changed since milestone 01 is that a request
- * to /api now knows which hospital it belongs to, and carries that hospital's
- * database client on req.prisma.
- *
- * The marked insertion point below is where milestone 03 attaches.
+ * The chain now runs end to end: hostname to hospital to database to session to
+ * user. Clinical modules attach at the marked point below.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,8 +27,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Behind Caddy in production, so req.ip and req.protocol reflect the real
-// client rather than the proxy. Now load-bearing: resolveTenant reads
-// req.hostname, which honours X-Forwarded-Host only because of this line.
+// client rather than the proxy. Load-bearing: resolveTenant reads req.hostname,
+// which honours X-Forwarded-Host only because of this line.
 app.set('trust proxy', 1);
 
 app.use(express.json());
@@ -44,10 +43,10 @@ if (process.env.APP_ORIGIN) {
 /*
  * Uploaded files.
  *
- * KNOWN GAP, and it is deliberate rather than overlooked. This serves one
- * directory to every hospital. With one instance per hospital that is correct.
- * On a shared server it is a cross-tenant read: hospital A could fetch hospital
- * B's scanned documents by guessing a path.
+ * KNOWN GAP, deliberate rather than overlooked. This serves one directory to
+ * every hospital. With one instance per hospital that is correct. On a shared
+ * server it is a cross-tenant read: hospital A could fetch hospital B's scanned
+ * documents by guessing a path.
  *
  * Milestone 05 is where attachments arrive and where this must be closed —
  * either by prefixing storage keys with the tenant and checking the prefix on
@@ -67,9 +66,6 @@ if (storage.root) {
  * Deliberately not tenant-resolved. A fleet script polling fifty installs needs
  * an answer without knowing or caring which hospital a hostname belongs to, and
  * needs one even when the control plane is the thing that is broken.
- *
- * So this reports what the PROCESS knows, including whether the control plane
- * is reachable. Per-hospital state is on /api/health, below.
  */
 app.get('/health', async (req, res) => {
   const control = await controlPlaneStatus();
@@ -88,9 +84,13 @@ app.get('/health', async (req, res) => {
 // ---------------------------------------------------------------------------
 // THE TENANT SEAM.
 //
-// Scoped to /api, and mounted before everything that touches hospital data.
+// Scoped to /api, and mounted before everything that touches hospital data —
+// including authentication, because sessions live in the hospital's own
+// database and there is nothing to authenticate against until the hospital is
+// known.
+//
 // From here down, req.prisma is the hospital's database client and req.tenant
-// says which hospital it is.
+// says which hospital.
 //
 // The rule this exists to enforce: no module imports a Prisma client. Every
 // module reads req.prisma. Forgetting produces `undefined` and a stack trace,
@@ -101,10 +101,10 @@ app.use('/api', resolveTenant);
 /*
  * Health — hospital level.
  *
- * Same shape as /health plus what only makes sense once a hospital is known:
- * which one, and how many migrations its database has actually had applied.
- * That second number is what answers "is this install on the current version"
- * without SSH access.
+ * Adds what only makes sense once a hospital is known: which one, how it was
+ * resolved, and how many migrations its database has actually had applied. That
+ * last number answers "is this installation on the current version" without
+ * SSH access.
  *
  * It is also what the staff app calls, because the Vite development proxy
  * forwards /api and /uploads and nothing else.
@@ -123,15 +123,16 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// MILESTONE 03 ONWARDS MOUNT ROUTERS HERE:
+// Modules.
 //
-//   app.use('/api/auth',     authRouter);              // mixed — guarded inside
+// Guard at the mount point wherever a whole router is protected. /auth is
+// MIXED — most of it must be reachable without a session, which is what it is
+// for — so it guards /me and /password individually, and says so at each route.
+//
+// Milestone 05 adds:
 //   app.use('/api/patients', requireAuth, patientsRouter);
-//
-// Guard at the mount point wherever the whole router is protected. Where a
-// router is mixed, guard inside it and say in a comment which route is public
-// and why — that comment is what stops the exception being copied by accident.
 // ---------------------------------------------------------------------------
+app.use('/api/auth', authRouter);
 
 // API 404 — scoped to /api ONLY.
 //
@@ -148,7 +149,7 @@ app.use('/api', (req, res) => {
 // proxies point back here.
 //
 // THE SPA FALLBACK is the important part. The app is a single index.html;
-// /app/patients/42 is not a file on disk. Without the splat route, opening or
+// /app/account is not a file on disk. Without the splat route, opening or
 // refreshing such a URL returns 404 even though navigating to it from inside
 // the app works perfectly.
 // ---------------------------------------------------------------------------
@@ -158,8 +159,7 @@ if (process.env.SERVE_STATIC === 'true') {
     res.sendFile(path.join(APP_DIST, 'index.html'));
   });
 
-  // Nothing lives at the root yet. The patient portal will, eventually. Until
-  // then send people to the staff app rather than an unexplained 404.
+  // Nothing lives at the root yet. The patient portal will, eventually.
   app.get('/', (req, res) => res.redirect('/app/'));
 }
 
@@ -180,12 +180,12 @@ app.use((err, req, res, next) => {
 });
 
 app.use((err, req, res, next) => {
-  // NEVER log req.body here. The moment clinical routes exist, that would print
-  // patient details into a log file — and log files get copied around, emailed
-  // to support, and pasted into chat.
+  // NEVER log req.body here. Clinical routes are one milestone away, and that
+  // would print patient details into a log file — and log files get copied
+  // around, emailed to support, and pasted into chat.
   //
-  // The tenant slug IS logged, and is the reason this line is worth having: on
-  // a shared server, an error without it cannot be traced to a hospital.
+  // The tenant slug IS logged: on a shared server, an error without it cannot
+  // be traced to a hospital.
   const who = req.tenant?.slug ?? '-';
   console.error(`[${who}] [${req.method} ${req.originalUrl}]`, err);
   res.status(500).json({ error: 'Internal server error' });

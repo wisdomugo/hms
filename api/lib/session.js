@@ -1,10 +1,11 @@
 import { randomBytes, createHash } from 'node:crypto';
 
 /*
- * Copied from SiteSilo with TWO changes, both noted below.
+ * Sessions.
  *
- * Everything else is untouched, and the important parts are worth restating
- * because they are easy to "simplify" into being wrong:
+ * Originally SiteSilo's, and now diverged in three places — all commented
+ * below. The parts that did not change are the parts that are easy to
+ * "simplify" into being wrong:
  *
  *   - The token in the cookie is random and opaque. Only its SHA-256 lands in
  *     the database. Someone who reads a database dump cannot forge a session.
@@ -19,9 +20,9 @@ export const COOKIE_NAME = 'hms_session';
 /*
  * CHANGE 1 — lifetime.
  *
- * SiteSilo used a fixed 7 days, which is right for a CMS one person signs into
- * from their own laptop. It is wrong for a ward computer three nurses share
- * across a shift change, so this is hours and it comes from the environment.
+ * A fixed seven days suits a CMS one person signs into from their own laptop.
+ * It is wrong for a ward computer three nurses share across a shift change, so
+ * this is hours and it comes from the environment.
  */
 const SESSION_HOURS = Number(process.env.SESSION_HOURS || 12);
 const SESSION_MS = SESSION_HOURS * 60 * 60 * 1000;
@@ -42,17 +43,11 @@ export function cookieOptions() {
 /*
  * CHANGE 2 — prisma is passed in, not imported.
  *
- * SiteSilo imports a module-level singleton here. This system has one database
- * PER HOSPITAL, so there is no singleton to import: the client belongs to the
- * request, and the tenant layer in step 2 puts it on req.prisma.
+ * One database per hospital means there is no singleton to import: the client
+ * belongs to the request, and the tenant layer puts it on req.prisma.
  *
- * Done now rather than in step 2 for one practical reason — it means this file
- * has no dangling import and is valid the moment it lands, so step 2 is purely
- * additive rather than a rewrite of code you have already reviewed.
- *
- * The rule this enforces: no module imports a Prisma singleton. Forget the
- * tenant and you get `undefined` and a stack trace, never another hospital's
- * patients.
+ * The rule this enforces: no module imports a Prisma client. Forget the tenant
+ * and you get `undefined` and a stack trace, never another hospital's patients.
  */
 
 export async function createSession(prisma, userId) {
@@ -72,7 +67,11 @@ export async function getSession(prisma, token) {
 
   const session = await prisma.session.findUnique({
     where: { id: hashToken(token) },
-    include: { user: { select: { id: true, email: true, name: true, role: true } } }
+    include: {
+      user: {
+        select: { id: true, email: true, name: true, role: true, isActive: true }
+      }
+    }
   });
 
   if (!session) return null;
@@ -81,6 +80,18 @@ export async function getSession(prisma, token) {
     await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
     return null;
   }
+
+  /*
+   * CHANGE 3 — a deactivated account has no valid session.
+   *
+   * Checked on every request rather than only at login. Staff leave, and when
+   * someone is deactivated the expectation is that they lose access now, not
+   * whenever their twelve-hour session happens to expire.
+   *
+   * The session row is left in place: it will expire on its own, and deleting
+   * it here would mean a read path doing writes on every request.
+   */
+  if (!session.user.isActive) return null;
 
   return session;
 }
@@ -91,33 +102,40 @@ export async function destroySession(prisma, token) {
 }
 
 export async function requireAuth(req, res, next) {
-  // req.prisma is set by the tenant middleware (step 2). If it is missing, the
-  // middleware is not mounted — say so plainly rather than throwing a
-  // TypeError three frames deeper.
-  if (!req.prisma) {
-    return next(new Error('req.prisma is not set — resolveTenant must run before requireAuth'));
-  }
+  try {
+    // Set by the tenant middleware. If it is missing, that middleware is not
+    // mounted — say so plainly rather than throwing a TypeError three frames
+    // deeper.
+    if (!req.prisma) {
+      return next(new Error('req.prisma is not set — resolveTenant must run before requireAuth'));
+    }
 
-  const session = await getSession(req.prisma, req.cookies?.[COOKIE_NAME]);
-  if (!session) {
-    return res.status(401).json({ error: 'Not authenticated' });
-  }
+    const session = await getSession(req.prisma, req.cookies?.[COOKIE_NAME]);
+    if (!session) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
 
-  req.user = session.user;
-  req.sessionId = session.id;   // so a password change can spare this session
-  next();
+    req.user = {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      role: session.user.role
+    };
+    req.sessionId = session.id;   // so a password change can spare this session
+
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 /*
- * Kept from SiteSilo as a placeholder, and it is temporary.
+ * PLACEHOLDER, and temporary.
  *
- * Two string roles is honest for a CMS. This system has receptionists, triage
- * nurses, doctors, lab scientists, pharmacists, cashiers, records officers, HR
- * and a medical director — with permissions that vary by department and ward.
- *
- * Step 4 replaces this with requirePermission('patient.register') backed by
- * Role and Permission tables. The MIDDLEWARE SHAPE stays exactly as it is
- * here; only what it consults changes.
+ * Two string roles is not what a hospital needs. Milestone 04 replaces this
+ * with requirePermission('patient.register') backed by Role and Permission
+ * tables. The middleware SHAPE stays exactly as it is here; only what it
+ * consults changes, which is why call sites will not have to move.
  */
 export function requireOwner(req, res, next) {
   if (req.user?.role !== 'owner') {

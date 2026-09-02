@@ -37,6 +37,37 @@ const TENANT_POOL_MAX = Number(process.env.TENANT_POOL_MAX || 3);
 // a connection string, so it is left alone deliberately.)
 const clients = new Map();
 
+/*
+ * A canary against a STALE GENERATED CLIENT.
+ *
+ * `prisma migrate dev` creates and applies a migration but does not reliably
+ * regenerate the client here — the control-plane script does its own generate,
+ * the hospital schema has no equivalent. When that happens the API starts
+ * perfectly and then every query fails with
+ *
+ *   TypeError: Cannot read properties of undefined (reading 'count')
+ *
+ * three frames deep in a service, naming nothing useful. The database is fine;
+ * the client simply does not know the model exists.
+ *
+ * Checked once per tenant, when the client is built. Not an exhaustive list —
+ * a canary. If auth's models are missing, everything after them is too.
+ */
+const CANARY_MODELS = ['user', 'session'];
+
+function assertClientIsCurrent(client) {
+  const missing = CANARY_MODELS.filter(name => !client[name]);
+  if (missing.length === 0) return;
+
+  throw new Error(
+    `The generated Prisma client is missing: ${missing.join(', ')}.\n` +
+    'prisma/schema.prisma declares models the client does not know about, ' +
+    'which means it was not regenerated after the schema changed. The database ' +
+    'is almost certainly fine.\n' +
+    'Fix with:  cd api && npm run generate'
+  );
+}
+
 export function getPrisma(tenant) {
   const existing = clients.get(tenant.databaseUrl);
   if (existing) return existing;
@@ -47,6 +78,8 @@ export function getPrisma(tenant) {
       max: TENANT_POOL_MAX
     })
   });
+
+  assertClientIsCurrent(client);
 
   clients.set(tenant.databaseUrl, client);
   return client;
