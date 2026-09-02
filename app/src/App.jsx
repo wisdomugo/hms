@@ -4,6 +4,7 @@ import Login from './screens/Login';
 import Setup from './screens/Setup';
 import Home from './screens/Home';
 import Account from './screens/Account';
+import Audit from './screens/Audit';
 
 /*
  * Auth gates the whole shell rather than living behind a /login route.
@@ -54,6 +55,10 @@ function Shell() {
 
   if (!user) return <Login />;
 
+  // Placeholder until milestone 06. Hiding a link protects nothing — the API
+  // refuses the request either way — it just avoids showing a locked door.
+  const isOwner = user.role === 'owner';
+
   return (
     <BrowserRouter basename="/app">
       <div className="shell">
@@ -66,11 +71,12 @@ function Shell() {
           <nav className="sidebar__nav" aria-label="Sections">
             <span className="sidebar__label">Clinical</span>
             <NavLink to="/">Home</NavLink>
-            {/* Patients, Appointments and the rest attach here as their
-                modules land. Milestone 05 adds the first. */}
+            {/* Patients and the rest attach here as their modules land.
+                Milestone 05 adds the first. */}
 
             <span className="sidebar__label">Settings</span>
             <NavLink to="/account">Account</NavLink>
+            {isOwner && <NavLink to="/audit">Audit log</NavLink>}
           </nav>
 
           <div className="sidebar__foot">
@@ -86,6 +92,10 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/account" element={<Account />} />
+            {/* Registered only for the owner, so anyone else typing the URL
+                lands on the redirect rather than an empty screen. The API
+                enforces it regardless. */}
+            {isOwner && <Route path="/audit" element={<Audit />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

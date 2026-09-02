@@ -1,6 +1,7 @@
 import express from 'express';
 import { COOKIE_NAME, cookieOptions, requireAuth } from '../../lib/session.js';
 import { verifySetupToken, clearSetupToken, hasSetupToken } from '../../lib/control-plane.js';
+import { auditRequest, record, actorFrom, ACTIONS } from '../../lib/audit.js';
 import * as auth from './service.js';
 
 const router = express.Router();
@@ -26,11 +27,7 @@ const router = express.Router();
  * 304. Harmless with fetch — the browser turns a 304 into a 200 with the stored
  * body — but the wrong property for these two to have. They report who you are
  * and whether this hospital has any accounts yet, and a stale answer to either
- * is worse than a slow one: a cached "needsSetup: true" would offer the setup
- * screen to a hospital that already has an owner.
- *
- * no-store rather than no-cache: no-cache still stores and revalidates, which
- * is precisely the round trip being removed.
+ * is worse than a slow one.
  */
 router.use((req, res, next) => {
   res.set('Cache-Control', 'no-store');
@@ -50,6 +47,15 @@ router.post('/login', async (req, res, next) => {
     const key = String(email).toLowerCase().trim();
 
     if (await auth.isLockedOut(req.prisma, key)) {
+      // Worth recording. A burst of these is what an attempted break-in looks
+      // like from the inside, and it is invisible without them.
+      await record(req.prisma, {
+        ...actorFrom(req),
+        action: ACTIONS.LOGIN_LOCKED,
+        outcome: 'denied',
+        meta: { email: key }
+      });
+
       return res.status(429).json({
         error: 'Too many attempts. Try again in a few minutes.'
       });
@@ -62,6 +68,17 @@ router.post('/login', async (req, res, next) => {
     // discover which staff emails are real.
     if (!user) {
       await auth.recordFailure(req.prisma, key);
+
+      // The attempted email is recorded, and it is a STAFF email, not patient
+      // data. It is the whole value of the entry: "someone is trying this
+      // account" is the question a failed-login log exists to answer.
+      await record(req.prisma, {
+        ...actorFrom(req),
+        action: ACTIONS.LOGIN_FAILED,
+        outcome: 'failed',
+        meta: { email: key }
+      });
+
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -69,6 +86,15 @@ router.post('/login', async (req, res, next) => {
 
     const token = await auth.startSession(req.prisma, user.id);
     res.cookie(COOKIE_NAME, token, cookieOptions());
+
+    await record(req.prisma, {
+      ...actorFrom(req),
+      actorId: user.id,
+      actorEmail: user.email,
+      action: ACTIONS.LOGIN,
+      entity: 'User',
+      entityId: user.id
+    });
 
     // Must match the shape returned by /me and /setup — the app reads
     // user.role from whichever of the three it happened to receive.
@@ -86,8 +112,25 @@ router.post('/login', async (req, res, next) => {
 // ---------------------------------------------------------------------------
 router.post('/logout', async (req, res, next) => {
   try {
+    // Read before the session is destroyed, so the log knows who left. Without
+    // this the entry would be anonymous, which is exactly the entry nobody can
+    // use.
+    const session = await auth.whoIs(req.prisma, req.cookies?.[COOKIE_NAME]);
+
     await auth.endSession(req.prisma, req.cookies?.[COOKIE_NAME]);
     res.clearCookie(COOKIE_NAME, { ...cookieOptions(), maxAge: undefined });
+
+    if (session) {
+      await record(req.prisma, {
+        ...actorFrom(req),
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: ACTIONS.LOGOUT,
+        entity: 'User',
+        entityId: session.user.id
+      });
+    }
+
     res.json({ ok: true });
   } catch (err) {
     next(err);
@@ -96,6 +139,10 @@ router.post('/logout', async (req, res, next) => {
 
 // ---------------------------------------------------------------------------
 // GET /api/auth/me   — guarded
+//
+// NOT audited. It runs on every page load, and a log where 95% of the rows say
+// "someone checked they were still signed in" is a log nobody reads — which
+// makes it worse than a smaller one.
 // ---------------------------------------------------------------------------
 router.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user, hospital: req.tenant.name });
@@ -104,12 +151,10 @@ router.get('/me', requireAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /api/auth/status
 //
-// What the app asks before showing anything. Three facts, and the hospital's
-// name so the login screen can say which hospital it belongs to.
-//
-// setupAvailable is separate from needsSetup on purpose. A hospital with no
-// accounts and no token left is stuck, and the app should say so rather than
-// showing a setup form that cannot succeed.
+// What the app asks before showing anything. setupAvailable is separate from
+// needsSetup on purpose: a hospital with no accounts and no token left is
+// stuck, and the app should say so rather than showing a form that cannot
+// succeed.
 // ---------------------------------------------------------------------------
 router.get('/status', async (req, res, next) => {
   try {
@@ -128,20 +173,22 @@ router.get('/status', async (req, res, next) => {
 //
 // Creates the first account for THIS hospital, authorised by the single-use
 // token that onboard.mjs generated and printed.
-//
-// The token lives in the control plane rather than the environment. One
-// SETUP_TOKEN in .env is one token for the whole server — on a shared server
-// that means whoever holds it can claim the first account at any hospital that
-// has not been set up yet.
 // ---------------------------------------------------------------------------
 router.post('/setup', async (req, res, next) => {
   try {
     const { token, email, password, name } = req.body ?? {};
 
     // Verified but NOT cleared yet. Clearing first would burn the token if
-    // account creation then failed, leaving the hospital unable to set up at
-    // all.
+    // account creation then failed, leaving the hospital unable to set up.
     if (!await verifySetupToken(req.tenant.id, token)) {
+      // The very first thing anyone could do to this hospital, and it failed.
+      // If that is someone guessing, this is the only place it will show.
+      await record(req.prisma, {
+        ...actorFrom(req),
+        action: ACTIONS.SETUP_REJECTED,
+        outcome: 'denied'
+      });
+
       return res.status(403).json({ error: 'Invalid or already-used setup token' });
     }
 
@@ -163,6 +210,15 @@ router.post('/setup', async (req, res, next) => {
     // Spent. From here the only way in is a password.
     await clearSetupToken(req.tenant.id);
 
+    await record(req.prisma, {
+      ...actorFrom(req),
+      actorId: user.id,
+      actorEmail: user.email,
+      action: ACTIONS.SETUP_COMPLETED,
+      entity: 'User',
+      entityId: user.id
+    });
+
     // Sign them straight in. No reason to make someone log in immediately
     // after choosing their own password.
     const sessionToken = await auth.startSession(req.prisma, user.id);
@@ -180,8 +236,7 @@ router.post('/setup', async (req, res, next) => {
 // ---------------------------------------------------------------------------
 // PATCH /api/auth/password   — guarded
 //
-// Anyone signed in can change their own password. Ends every OTHER session for
-// that user, sparing the current one.
+// Ends every OTHER session for that user, sparing the current one.
 // ---------------------------------------------------------------------------
 router.patch('/password', requireAuth, async (req, res, next) => {
   try {
@@ -202,11 +257,30 @@ router.patch('/password', requireAuth, async (req, res, next) => {
     });
 
     if (result.error === 'wrong-current') {
+      // Someone with a valid session who does not know the password. That is
+      // what a borrowed workstation looks like, and it is the reason a refused
+      // action is worth recording at all.
+      await auditRequest(req, {
+        action: ACTIONS.PASSWORD_CHANGED,
+        outcome: 'denied',
+        entity: 'User',
+        entityId: req.user.id
+      });
+
       return res.status(403).json({ error: 'Current password is incorrect' });
     }
     if (result.error) {
       return res.status(404).json({ error: 'Account not found' });
     }
+
+    await auditRequest(req, {
+      action: ACTIONS.PASSWORD_CHANGED,
+      entity: 'User',
+      entityId: req.user.id,
+      // A count, not a list. How many sessions ended is useful; which devices
+      // they were is detail the log does not need.
+      meta: { otherSessionsEnded: result.otherSessionsEnded }
+    });
 
     res.json({ ok: true, otherSessionsEnded: result.otherSessionsEnded });
   } catch (err) {

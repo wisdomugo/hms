@@ -10,6 +10,7 @@ import { resolveTenant, appliedMigrationCount } from './lib/tenancy.js';
 import { controlPlaneStatus } from './lib/control-plane.js';
 
 import authRouter from './modules/auth/routes.js';
+import auditRouter from './modules/audit/routes.js';
 
 /*
  * MILESTONE 03 — the shell, the tenant seam, and authentication.
@@ -133,6 +134,11 @@ app.get('/api/health', async (req, res) => {
 //   app.use('/api/patients', requireAuth, patientsRouter);
 // ---------------------------------------------------------------------------
 app.use('/api/auth', authRouter);
+
+// Read-only, and guarded inside: signed in, then owner-only. Milestone 06
+// narrows that to requirePermission('audit.read') — a permission very few roles
+// should carry, since the log names who did what.
+app.use('/api/audit', auditRouter);
 
 // API 404 — scoped to /api ONLY.
 //

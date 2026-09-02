@@ -4,7 +4,9 @@
 // and that is the point: separation is the database boundary, not a WHERE
 // clause someone has to remember.
 //
-// Milestone 03 adds the first models. Migration: add_auth.
+// Migrations so far:
+//   add_auth   User, Session, LoginThrottle          (milestone 03)
+//   add_audit  AuditEvent                            (milestone 04)
 
 generator client {
   provider = "prisma-client"
@@ -23,12 +25,12 @@ model User {
   passwordHash String
   name         String?
 
-  // PLACEHOLDER. Two string roles is what milestone 01 inherited and it is not
-  // what a hospital needs — receptionists, triage nurses, doctors, lab
-  // scientists, pharmacists, cashiers, records officers, HR and a medical
-  // director, with permissions varying by department and ward.
+  // PLACEHOLDER. Two string roles is not what a hospital needs — receptionists,
+  // triage nurses, doctors, lab scientists, pharmacists, cashiers, records
+  // officers, HR and a medical director, with permissions varying by department
+  // and ward.
   //
-  // Milestone 04 replaces this column with Role and Permission tables. The
+  // Milestone 06 replaces this column with Role and Permission tables. The
   // middleware SHAPE stays as it is; only what it consults changes.
   role String @default("staff")   // 'owner' | 'staff'
 
@@ -40,7 +42,9 @@ model User {
   // their next request rather than at the end of their session.
   isActive Boolean @default(true)
 
-  sessions  Session[]
+  sessions    Session[]
+  auditEvents AuditEvent[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -62,20 +66,80 @@ model Session {
 
 // Brute-force brake, in the database rather than in memory.
 //
-// SiteSilo kept this in a Map, and said so: fine for a single-instance CMS.
-// Two things make that wrong here. It resets on restart, so an attacker gets a
-// fresh five attempts every deploy. And it lives in one process, so it counts
-// nothing once there is more than one.
-//
-// In the hospital's own database, so throttling is per hospital automatically —
-// hammering one hospital's login does not lock an account at another that
-// happens to share an email address.
+// In memory it resets on every restart — an attacker gets a fresh five attempts
+// per deploy — and counts nothing once there is more than one process. Being in
+// the hospital's own database also makes it per-hospital for free.
 model LoginThrottle {
   email       String   @id
   failures    Int      @default(0)
   windowStart DateTime @default(now())
 
-  // Rows survive for emails that never succeed. Harmless and small, but
-  // indexed so a periodic sweep is cheap when one is worth adding.
   @@index([windowStart])
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT
+//
+// Permissions decide who MAY act. This records who DID.
+//
+// It exists before the module it is for because it is the one thing that cannot
+// be added retrospectively: permissions introduced later work from that day on,
+// but a log introduced later has nothing to say about what came before it.
+//
+// APPEND ONLY. Nothing updates or deletes a row here. The application enforces
+// that by having no route that could — see modules/audit/routes.js. Enforcing
+// it in Postgres properly means a database role holding INSERT and SELECT but
+// not UPDATE or DELETE on this table, and that should be set up before the
+// pilot hospital goes live.
+// ---------------------------------------------------------------------------
+model AuditEvent {
+  id Int @id @default(autoincrement())
+
+  at DateTime @default(now())
+
+  // Nullable, because not every event has a signed-in actor: a failed login has
+  // none by definition, and neither does a scheduled job.
+  //
+  // SetNull rather than Cascade — deleting a user must never delete the record
+  // of what they did. (Users are deactivated rather than deleted anyway, so
+  // this is a second line of defence.)
+  actorId Int?
+  actor   User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  // The actor's email AS IT WAS. A snapshot, not a convenience: staff change
+  // their names and leave, and the log has to stay readable years later without
+  // depending on a row that has moved on.
+  actorEmail String?
+
+  // What happened: '<area>.<verb>', from ACTIONS in lib/audit.js. Never typed
+  // as a literal at a call site — a typo becomes an event no report ever finds.
+  action String
+
+  // What it happened to. entityId is a STRING because Patient ids are integers
+  // and Tenant ids are cuids, and a log that can only reference one kind of id
+  // stops being written the first time that is inconvenient.
+  entity   String?
+  entityId String?
+
+  // 'ok' | 'failed' | 'denied'. A refused action is worth recording — often
+  // more than a successful one.
+  outcome String @default("ok")
+
+  ip        String?
+  userAgent String?
+
+  // Identifiers and field NAMES only. NEVER field values, and never anything
+  // clinical. The audit log is read by more people than the records it
+  // describes, so copying detail into it quietly widens who can see that
+  // detail — and an append-only table is one nobody can correct afterwards.
+  meta Json?
+
+  // at            — the log is read newest-first, always
+  // actorId       — "what has this member of staff been doing"
+  // entity+id     — "what has happened to this patient"  ← the investigation query
+  // action        — "show me every merge this month"
+  @@index([at])
+  @@index([actorId])
+  @@index([entity, entityId])
+  @@index([action])
 }

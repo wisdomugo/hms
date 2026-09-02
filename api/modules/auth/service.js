@@ -1,5 +1,5 @@
 import { hashPassword, verifyPassword } from '../../lib/password.js';
-import { createSession, destroySession } from '../../lib/session.js';
+import { createSession, destroySession, getSession } from '../../lib/session.js';
 
 /*
  * Business rules for authentication.
@@ -8,9 +8,10 @@ import { createSession, destroySession } from '../../lib/session.js';
  * and takes `prisma` as its first argument because every one of these runs
  * against a specific hospital's database.
  *
- * Milestone 04 wraps these calls with the audit log. Login, failed login and
- * logout are the first three events worth recording, and this is where the
- * wrapper goes — one place rather than scattered through the routes.
+ * Audit calls live in routes.js rather than here. That is a deliberate choice
+ * and worth stating: an audit entry needs the IP address and the user agent,
+ * which are properties of the REQUEST, not of the rule. Pushing them down here
+ * would mean threading req through every function to serve the log.
  */
 
 const MAX_FAILURES = 5;
@@ -92,6 +93,17 @@ export async function authenticate(prisma, email, password) {
 
   const ok = await verifyPassword(password, user.passwordHash);
   return ok ? user : null;
+}
+
+/**
+ * Who does this token belong to, without requiring a session middleware?
+ *
+ * Exists for logout. The session has to be read BEFORE it is destroyed, or the
+ * audit entry is anonymous — and an anonymous "somebody signed out" is exactly
+ * the entry nobody can use.
+ */
+export async function whoIs(prisma, token) {
+  return getSession(prisma, token);
 }
 
 export async function startSession(prisma, userId) {
