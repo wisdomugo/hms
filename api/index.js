@@ -6,15 +6,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { storage } from './lib/storage/index.js';
+import { resolveTenant, appliedMigrationCount } from './lib/tenancy.js';
+import { controlPlaneStatus } from './lib/control-plane.js';
 
 /*
- * STEP 1 — the shell, and deliberately nothing else.
+ * MILESTONE 02 — the shell plus the tenant seam.
  *
- * No routers are mounted. Everything here is plumbing: the pieces that are
- * miserable to debug LATER, once there is new code to blame for a failure
- * that is actually a proxy setting or a missing environment variable.
+ * Still no domain routers. What changed since milestone 01 is that a request
+ * to /api now knows which hospital it belongs to, and carries that hospital's
+ * database client on req.prisma.
  *
- * The two marked insertion points below are where step 2 and step 3 attach.
+ * The marked insertion point below is where milestone 03 attaches.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,28 +27,13 @@ const STARTED_AT = new Date().toISOString();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Behind Caddy in production, so req.ip and req.protocol must reflect the real
-// client rather than the proxy. Not load-bearing today. It becomes so the
-// moment anything rate-limits by IP, and the moment the audit log starts
-// recording a source address — which is step 4.
+// Behind Caddy in production, so req.ip and req.protocol reflect the real
+// client rather than the proxy. Now load-bearing: resolveTenant reads
+// req.hostname, which honours X-Forwarded-Host only because of this line.
 app.set('trust proxy', 1);
 
 app.use(express.json());
 app.use(cookieParser());
-
-// ---------------------------------------------------------------------------
-// STEP 2 INSERTS THE TENANT SEAM HERE:
-//
-//   app.use(resolveTenant);
-//
-// Hostname -> tenant -> req.tenant and req.prisma. It must run BEFORE anything
-// that touches the database, including auth, because sessions live in the
-// tenant's own database rather than a shared one.
-//
-// The rule that comes with it: no module ever imports a Prisma singleton.
-// Every module reads req.prisma. Forgetting produces `undefined` and a stack
-// trace, not another hospital's patients.
-// ---------------------------------------------------------------------------
 
 // Optional CORS — only active when the staff app is served from another origin.
 if (process.env.APP_ORIGIN) {
@@ -54,50 +41,89 @@ if (process.env.APP_ORIGIN) {
   app.use(cors({ origin: process.env.APP_ORIGIN, credentials: true }));
 }
 
-// Uploaded files are served directly. Only mounted for drivers that keep files
-// on this machine; with S3 the files are not here at all and storage.root is
-// undefined.
+/*
+ * Uploaded files.
+ *
+ * KNOWN GAP, and it is deliberate rather than overlooked. This serves one
+ * directory to every hospital. With one instance per hospital that is correct.
+ * On a shared server it is a cross-tenant read: hospital A could fetch hospital
+ * B's scanned documents by guessing a path.
+ *
+ * Milestone 05 is where attachments arrive and where this must be closed —
+ * either by prefixing storage keys with the tenant and checking the prefix on
+ * the way out, or by moving to S3 with per-tenant prefixes and signed URLs.
+ * Nothing writes here before then, so nothing is exposed yet.
+ */
 if (storage.root) {
   app.use('/uploads', express.static(storage.root, {
     maxAge: '30d',
-    // Stop a browser second-guessing the declared content type.
     setHeaders: res => res.setHeader('X-Content-Type-Options', 'nosniff')
   }));
 }
 
 /*
- * Health.
+ * Health — process level, ABOVE the tenant layer.
  *
- * More than a liveness ping, and worth getting the shape right now.
+ * Deliberately not tenant-resolved. A fleet script polling fifty installs needs
+ * an answer without knowing or caring which hospital a hostname belongs to, and
+ * needs one even when the control plane is the thing that is broken.
  *
- * With one instance per hospital, this endpoint is the only way to answer
- * "what is actually running out there" without SSH-ing into someone's server.
- * A fleet script polls every install and prints a table: version, migration
- * state, uptime. `migrations` and `commit` stay null until step 2 and the
- * deploy script fill them in — the shape is fixed now so the fleet script
- * never has to change.
- *
- * Registered on two paths on purpose. /health is what a load balancer and the
- * fleet script hit. /api/health is what the staff app hits, because the Vite
- * dev proxy only forwards /api and /uploads.
+ * So this reports what the PROCESS knows, including whether the control plane
+ * is reachable. Per-hospital state is on /api/health, below.
  */
-function health(req, res) {
+app.get('/health', async (req, res) => {
+  const control = await controlPlaneStatus();
+
+  res.json({
+    status: control.reachable ? 'ok' : 'degraded',
+    uptime: process.uptime(),
+    startedAt: STARTED_AT,
+    node: process.version,
+    env: process.env.NODE_ENV ?? 'development',
+    commit: process.env.GIT_COMMIT ?? null,   // set by deploy.sh
+    controlPlane: control
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE TENANT SEAM.
+//
+// Scoped to /api, and mounted before everything that touches hospital data.
+// From here down, req.prisma is the hospital's database client and req.tenant
+// says which hospital it is.
+//
+// The rule this exists to enforce: no module imports a Prisma client. Every
+// module reads req.prisma. Forgetting produces `undefined` and a stack trace,
+// never another hospital's patients.
+// ---------------------------------------------------------------------------
+app.use('/api', resolveTenant);
+
+/*
+ * Health — hospital level.
+ *
+ * Same shape as /health plus what only makes sense once a hospital is known:
+ * which one, and how many migrations its database has actually had applied.
+ * That second number is what answers "is this install on the current version"
+ * without SSH access.
+ *
+ * It is also what the staff app calls, because the Vite development proxy
+ * forwards /api and /uploads and nothing else.
+ */
+app.get('/api/health', async (req, res) => {
   res.json({
     status: 'ok',
     uptime: process.uptime(),
     startedAt: STARTED_AT,
     node: process.version,
     env: process.env.NODE_ENV ?? 'development',
-    commit: process.env.GIT_COMMIT ?? null,   // set by deploy.sh
-    migrations: null                          // step 2
+    commit: process.env.GIT_COMMIT ?? null,
+    tenant: req.tenant,
+    migrations: await appliedMigrationCount(req.prisma)
   });
-}
-
-app.get('/health', health);
-app.get('/api/health', health);
+});
 
 // ---------------------------------------------------------------------------
-// STEP 3 ONWARDS MOUNT ROUTERS HERE:
+// MILESTONE 03 ONWARDS MOUNT ROUTERS HERE:
 //
 //   app.use('/api/auth',     authRouter);              // mixed — guarded inside
 //   app.use('/api/patients', requireAuth, patientsRouter);
@@ -154,10 +180,14 @@ app.use((err, req, res, next) => {
 });
 
 app.use((err, req, res, next) => {
-  // NEVER log req.body here. The moment clinical routes exist, that would
-  // print patient details into a log file — and log files get copied around,
-  // emailed to support, and pasted into chat. Method, path and the error only.
-  console.error(`[${req.method} ${req.originalUrl}]`, err);
+  // NEVER log req.body here. The moment clinical routes exist, that would print
+  // patient details into a log file — and log files get copied around, emailed
+  // to support, and pasted into chat.
+  //
+  // The tenant slug IS logged, and is the reason this line is worth having: on
+  // a shared server, an error without it cannot be traced to a hospital.
+  const who = req.tenant?.slug ?? '-';
+  console.error(`[${who}] [${req.method} ${req.originalUrl}]`, err);
   res.status(500).json({ error: 'Internal server error' });
 });
 

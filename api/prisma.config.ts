@@ -6,23 +6,32 @@ import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
-  migrations: {
-    path: "prisma/migrations",
-    // No seed script yet. Step 4 adds one for Role and Permission, and it is
-    // the seed — not a hand-written INSERT — that becomes the definition of
-    // what roles a fresh hospital starts with.
-    // seed: "node prisma/seed.js",
-  },
+
+  // NOTE: migrations.path is deliberately NOT set.
+  //
+  // There are two schemas in this project — the hospital schema and the control
+  // plane's — and each needs its own migration history. Left unset, Prisma puts
+  // migrations next to whichever schema `--schema` names:
+  //
+  //   prisma/migrations/           tenant (hospital) databases
+  //   prisma/control/migrations/   the control plane
+  //
+  // Pinning a path here would send both to the same folder, which would apply
+  // the control plane's tables to every hospital database.
+
   datasource: {
-    // The DEVELOPMENT connection string, and the database the control plane
-    // itself lives in.
+    // What the prisma CLI connects to when nothing overrides it: the
+    // DEVELOPMENT database.
     //
-    // This is what the prisma CLI uses: `migrate dev`, `migrate deploy`,
-    // `studio`. It is NOT how the running application connects — from step 2
-    // the app builds one client per hospital from the control plane, via the
-    // driver adapter, which is why schema.prisma has no `url` of its own.
+    // The scripts in api/scripts/ set DATABASE_URL per invocation — to the
+    // control plane for control migrations, to each hospital in turn for tenant
+    // migrations. Windows cannot do `DATABASE_URL=... npx prisma`, which is why
+    // they are Node scripts that spawn with an environment rather than npm
+    // one-liners.
     //
-    // scripts/migrate-all.mjs will override this per tenant when it loops.
+    // The RUNNING APPLICATION never uses this. From milestone 02 it builds one
+    // client per hospital from the control plane via the driver adapter, which
+    // is why schema.prisma has no `url` of its own.
     url: process.env["DATABASE_URL"],
   },
 });

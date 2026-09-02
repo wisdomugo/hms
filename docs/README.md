@@ -9,8 +9,8 @@ way, how to reproduce it from scratch, and what went wrong on the way. Named
 | Guide | Covers | Status |
 |---|---|---|
 | 01 | Scaffold, shared library and verified plumbing | Complete — 2 Sep 2026 |
-| 02 | The tenant seam: control plane, per-hospital databases, fleet scripts | Next |
-| 03 | Authentication end to end | |
+| 02 | The tenant seam: control plane, per-hospital databases, fleet scripts | Complete — 2 Sep 2026 |
+| 03 | Authentication end to end | Next |
 | 04 | Roles, permissions and the audit log | |
 | 05 | `add_patients` — Module 01, Patient Registration | |
 

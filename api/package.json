@@ -9,7 +9,11 @@
   },
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "control:migrate": "node scripts/control-migrate.mjs",
+    "control:generate": "prisma generate --schema prisma/control/schema.prisma",
+    "onboard": "node scripts/onboard.mjs",
+    "migrate:all": "node scripts/migrate-all.mjs"
   },
   "author": "Wisdom Nukas",
   "license": "UNLICENSED",

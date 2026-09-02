@@ -139,10 +139,11 @@ later.
 
 ## What is deliberately not here
 
-- **No models.** `schema.prisma` has a generator and a datasource and nothing else.
-- **No routers.** `api/index.js` has two marked insertion points instead.
-- **No `lib/prisma.js`.** This is the one SiteSilo `lib/` file that does not come
-  across, and the reason is below.
+- **No hospital models.** `prisma/schema.prisma` has a generator and a datasource
+  and nothing else. The control plane has its own schema, and that one does have
+  models — it is a different database.
+- **No routers.** `api/index.js` has one marked insertion point instead, for
+  milestone 03.
 - **No auth screens.** `lib/session.js` and `lib/password.js` are present but
   nothing imports them yet.
 
@@ -163,29 +164,64 @@ one hospital another hospital's patients. **The failure mode of forgetting is a
 crash, not a leak.**
 
 `api/lib/session.js` is already written in this shape — it takes `prisma` as an
-argument rather than importing one. That is the only change to it beyond the
-session lifetime, and it was done now so the file has no dangling import and
-step 2 is purely additive.
+argument rather than importing one. That was done at milestone 01, so the file
+had no dangling import and milestone 02 could be purely additive.
 
 ---
 
-## What step 2 does
+## Milestones
 
-1. `lib/control-plane.js` — a separate small database holding
-   `Tenant { slug, hostnames[], databaseUrl, status, plan }`.
-2. `lib/tenancy.js` — `getPrisma(tenant)` with a cached client per connection
-   string, and `resolveTenant` middleware. Mounted at the marked line in
-   `index.js`, before auth.
-3. `scripts/migrate-all.mjs` and `scripts/onboard.mjs` — loop every tenant
-   database; create, migrate and register a new hospital in one command.
-4. `/health` starts reporting applied migration count.
+| # | What it built | Status |
+|---|---|---|
+| 01 | Scaffold, shared library, verified plumbing | Complete |
+| 02 | The tenant seam — control plane, per-hospital databases, fleet scripts | Complete |
+| 03 | Authentication end to end | Next |
+| 04 | Roles, permissions, audit log | |
+| 05 | `add_patients` — Module 01, Patient Registration | |
 
-Build it degenerate first: one tenant, resolution that always returns it, real
-`req.prisma` plumbing. About half a day, and it means no module is ever written
-against a singleton.
+Each gets a developer guide in `docs/`, written once its verification checks
+pass.
 
-## Then
+## Working with the tenant seam
 
-Step 3 auth end to end · step 4 roles and audit · step 5 `add_patients`.
+There are now two kinds of database. The **control plane** (`hms_control`) holds
+the routing table: which hostname belongs to which hospital, and where that
+hospital's data lives. A **hospital database** holds one hospital's records.
 
-See `docs/` and the architecture proposal for the reasoning behind each.
+```bash
+cd api
+
+# Add a hospital: creates its database, migrates it, registers it.
+npm run onboard -- --slug demo --name "Demo Hospital" --host demo.localhost
+
+# Apply pending migrations to every hospital. Part of every deploy.
+npm run migrate:all
+npm run migrate:all -- --dry-run
+
+# Change the routing table's own schema (rare).
+npm run control:migrate                        # apply existing
+npm run control:migrate -- --dev --name x      # create a new one
+```
+
+In development, three things can select a hospital, in this order:
+
+1. `X-Tenant: demo` as a request header — ignored when `NODE_ENV=production`
+2. the request's hostname
+3. `DEFAULT_TENANT` in `.env`, which is also what a single-hospital install uses
+
+Lookups are cached for `TENANT_CACHE_MS`, so a newly onboarded hospital can take
+up to a minute for a running API to notice.
+
+## What milestone 03 does
+
+Authentication end to end:
+
+- `User` and `Session` as the first **hospital** migration, `add_auth`
+- `modules/auth/` — login, logout, `/me`, `/status`, and the token-gated
+  `/setup` that creates the first account on a fresh installation
+- the staff app's real shell: the three-state auth probe (checking / ready /
+  unreachable) replacing the health screen
+
+`lib/session.js` already takes `prisma` as an argument, so it plugs into
+`req.prisma` with no changes. `requireOwner` in that file is a placeholder;
+milestone 04 replaces it with `requirePermission` backed by real tables.

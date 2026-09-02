@@ -4,12 +4,17 @@ Shared building blocks. Nothing in here knows about a specific module.
 
 ## What is here at step 1
 
+These files originated in the SiteSilo CMS. That is history, not a link — the
+HMS does not track SiteSilo, and any of them can be changed the moment there is
+a reason to. The column below records their state on arrival, so a later reader
+knows why a file looks the way it does.
+
 | File | Provenance |
 |---|---|
-| `password.js` | Copied from SiteSilo, unchanged. |
-| `storage/index.js`, `storage/local.js` | Copied from SiteSilo, unchanged. |
-| `session.js` | Copied from SiteSilo with two changes, both commented in the file: session lifetime is hours from the environment rather than a fixed 7 days, and `prisma` is passed in rather than imported. |
-| `upload.js` | Copied from SiteSilo, unchanged. Copied as bytes, never retyped — see below. |
+| `password.js` | Arrived from SiteSilo unchanged. |
+| `storage/index.js`, `storage/local.js` | Arrived from SiteSilo unchanged. |
+| `session.js` | Arrived from SiteSilo with two changes, both commented in the file: session lifetime is hours from the environment rather than a fixed 7 days, and `prisma` is passed in rather than imported. |
+| `upload.js` | Arrived from SiteSilo unchanged. Copied as bytes, never retyped — see below. |
 
 ### upload.js
 

@@ -1,0 +1,75 @@
+// THE CONTROL PLANE
+//
+// A separate, small database — not a schema inside a hospital's database. It
+// holds one thing: the routing table. Which hostname belongs to which hospital,
+// and where that hospital's data lives.
+//
+// It is the piece that makes one build serve both deployment modes. On a shared
+// server it has one row per hospital. On a hospital's own server it has exactly
+// one row and resolution returns it every time. Same code path either way,
+// which is the entire point of the design.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../generated/control"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Tenant {
+  id   String @id @default(cuid())
+
+  // The stable machine name: "stnicholas". Used in scripts, logs and the
+  // X-Tenant development header. It does not change.
+  slug String @unique
+
+  // The display name: "St Nicholas Hospital". This one does change.
+  name String
+
+  // The connection string for THIS hospital's database.
+  //
+  // IT IS A CREDENTIAL, not configuration. The control-plane database must be
+  // protected accordingly. Never put it on `req`, never log it, never return it
+  // from an endpoint — lib/tenancy.js is the only module that reads it.
+  databaseUrl String
+
+  // onboarding — database created, migrations applied, not yet open to users
+  // active     — normal operation
+  // suspended  — reachable, but every request is refused with a clear message
+  //
+  // Present from the first migration deliberately. Adding it later would mean
+  // changing the resolution path, and that is the one piece of code in the
+  // system that should not churn.
+  status String @default("onboarding")
+
+  // Commercial tier. Nothing reads it yet.
+  plan String?
+
+  hostnames TenantHostname[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// A separate table rather than a String[] column on Tenant, for one reason:
+// UNIQUENESS IS THEN ENFORCED BY THE DATABASE.
+//
+// The hostname is the routing key. Two hospitals sharing one would mean
+// requests for hospital A reaching hospital B's records — the worst failure
+// available in this system. Making hostname the primary key turns that from
+// unlikely into impossible, and turns a collision into a clear error at
+// onboarding time rather than a silent misroute in production.
+model TenantHostname {
+  hostname String @id   // lowercase, no port. e.g. "stnicholas.hms.ng"
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+}
