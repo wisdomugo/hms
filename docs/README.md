@@ -1,5 +1,26 @@
 # docs
 
+## Developer guides — one per milestone
+
+A record of what was built at each milestone, why the decisions were made that
+way, how to reproduce it from scratch, and what went wrong on the way. Named
+`DEV_GUIDE_NN - Milestone - <what it covers>.docx`.
+
+| Guide | Covers | Status |
+|---|---|---|
+| 01 | Scaffold, shared library and verified plumbing | Complete — 2 Sep 2026 |
+| 02 | The tenant seam: control plane, per-hospital databases, fleet scripts | Next |
+| 03 | Authentication end to end | |
+| 04 | Roles, permissions and the audit log | |
+| 05 | `add_patients` — Module 01, Patient Registration | |
+
+The "what went wrong" sections are the point. A milestone that records only
+what worked is a description; one that records the version drift in
+`allowScripts` and the `master`/`main` mismatch is something you can hand to
+someone else.
+
+## Module documentation
+
 One document per module, alongside the workflow documents already written in
 `Hospital Mgt System2/`.
 
