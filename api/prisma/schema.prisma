@@ -1,0 +1,25 @@
+// HMS — Prisma schema
+//
+// Empty on purpose at step 1.
+//
+// `npx prisma generate` should succeed against this file before a single model
+// exists. That way, when generation fails later, the config has already been
+// ruled out and the new model is the only suspect.
+//
+// What lands where:
+//   step 2   Tenant, in the CONTROL PLANE (its own schema file and database)
+//   step 4   Role, Permission, AuditEvent
+//   step 5   Patient, PatientIdentifier, NextOfKin, PatientPayer, Visit,
+//            PatientAttachment, PatientMerge, Setting  — migration add_patients
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+// No `url` here on purpose. The connection string is supplied at runtime by
+// the driver adapter (@prisma/adapter-pg), which is what makes one Prisma
+// client per hospital database possible in step 2.
+datasource db {
+  provider = "postgresql"
+}

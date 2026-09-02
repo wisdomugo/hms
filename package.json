@@ -1,0 +1,12 @@
+{
+  "name": "hms",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hospital Management System — Express API, Prisma/PostgreSQL, React staff app.",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "comment": "Repo-level tooling only. api/ and app/ each have their own package.json and their own dependencies; install in each. Nothing is installed here, which is why there are no dependencies and no lockfile to keep.",
+  "scripts": {}
+}

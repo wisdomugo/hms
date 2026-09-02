@@ -1,0 +1,33 @@
+{
+  "name": "hms-api",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "HMS — Express API, Prisma models and media storage",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "author": "Wisdom Nukas",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1",
+    "image-size": "^2.0.2",
+    "multer": "^2.2.0"
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2",
+    "prisma": "^7.9.1"
+  },
+  "comment": "allowScripts is not optional. npm 12 blocks dependency install scripts by default, and Prisma needs its preinstall and postinstall. Without them Prisma can fail at RUNTIME rather than at install time, which is a miserable place to discover the problem. The versions below are EXACT and must be bumped whenever the resolved Prisma version changes — npm names the version it wants approved in the warning, so paste that in and re-run npm install.",
+  "allowScripts": {
+    "prisma@7.10.0": true,
+    "@prisma/engines@7.10.0": true
+  }
+}

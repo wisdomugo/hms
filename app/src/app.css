@@ -1,0 +1,67 @@
+/*
+ * Placeholder styling only. Enough to read the step-1 screen, and nothing that
+ * a real design system would then have to unpick — SiteSilo ships with an
+ * empty stylesheet for exactly this reason.
+ */
+
+:root {
+  --ink: #10201f;
+  --muted: #5c6f71;
+  --line: #dbe4e4;
+  --bg: #f6f9f9;
+  --ok: #0f6e6b;
+  --bad: #a3401a;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.shell {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+}
+
+.shell__head { border-bottom: 1px solid var(--line); padding-bottom: 1.5rem; }
+
+.eyebrow {
+  margin: 0 0 .6rem;
+  font-size: .7rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+
+h1 { margin: 0 0 .4rem; font-size: 1.6rem; letter-spacing: -.015em; }
+h2 { margin: 0 0 .6rem; font-size: 1rem; }
+
+.sub { margin: 0; color: var(--muted); }
+
+.status { margin-top: 2rem; }
+.status--wait { color: var(--muted); }
+.status--ok h2 { color: var(--ok); }
+.status--bad h2 { color: var(--bad); }
+
+dl { margin: 1rem 0; display: grid; gap: .35rem; }
+dl > div { display: grid; grid-template-columns: 9rem 1fr; gap: 1rem; }
+dt { color: var(--muted); font-size: .82rem; }
+dd { margin: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .82rem; }
+
+button {
+  font: inherit;
+  font-size: .88rem;
+  padding: .45rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+button:hover { border-color: var(--ok); color: var(--ok); }

@@ -1,0 +1,10 @@
+# Normalise line endings. Development happens on Windows, deployment on Linux,
+# and without this every file looks modified the first time it crosses over.
+* text=auto eol=lf
+
+# Shell scripts must be LF or the server's shell refuses them with a
+# "bad interpreter" error that names the wrong thing entirely.
+*.sh text eol=lf
+
+# Lockfiles are generated; collapse them in diffs.
+package-lock.json linguist-generated=true -diff

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+generated/
+
+# Real secrets. .env.example IS committed; .env is not.
+.env
+.env.local
+*.local
+
+# Uploaded files are the hospital's data, not source code. They never travel
+# by git — see docs/WORKFLOW.md.
+api/uploads/
+
+# Logs and editor noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
