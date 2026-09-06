@@ -7,10 +7,13 @@ import { fileURLToPath } from 'node:url';
 
 import { storage } from './lib/storage/index.js';
 import { resolveTenant, appliedMigrationCount } from './lib/tenancy.js';
+import { serveUpload } from './lib/uploads-route.js';
+import { requireAuth } from './lib/session.js';
 import { controlPlaneStatus } from './lib/control-plane.js';
 
 import authRouter from './modules/auth/routes.js';
 import auditRouter from './modules/audit/routes.js';
+import patientsRouter, { worklist } from './modules/patients/routes.js';
 
 /*
  * MILESTONE 03 — the shell, the tenant seam, and authentication.
@@ -42,24 +45,22 @@ if (process.env.APP_ORIGIN) {
 }
 
 /*
- * Uploaded files.
+ * Uploaded files — clinical documents, and now properly guarded.
  *
- * KNOWN GAP, deliberate rather than overlooked. This serves one directory to
- * every hospital. With one instance per hospital that is correct. On a shared
- * server it is a cross-tenant read: hospital A could fetch hospital B's scanned
- * documents by guessing a path.
+ * Until milestone 05b this was express.static pointed at one folder: no
+ * authentication, and no tie between a file and a hospital. Harmless only
+ * because nothing wrote there. 05b starts writing, so 05b closes it.
  *
- * Milestone 05 is where attachments arrive and where this must be closed —
- * either by prefixing storage keys with the tenant and checking the prefix on
- * the way out, or by moving to S3 with per-tenant prefixes and signed URLs.
- * Nothing writes here before then, so nothing is exposed yet.
+ * Three changes, all in lib/uploads-route.js:
+ *   - every storage key now begins with the hospital's slug
+ *   - the handler refuses any path outside the requesting hospital's prefix
+ *   - it needs a session, because these are scanned ID cards and referral
+ *     letters, not website images
+ *
+ * resolveTenant is mounted here as well as on /api, because the handler cannot
+ * check a prefix without knowing which hospital is asking.
  */
-if (storage.root) {
-  app.use('/uploads', express.static(storage.root, {
-    maxAge: '30d',
-    setHeaders: res => res.setHeader('X-Content-Type-Options', 'nosniff')
-  }));
-}
+app.use('/uploads', resolveTenant, requireAuth, serveUpload);
 
 /*
  * Health — process level, ABOVE the tenant layer.
@@ -139,6 +140,15 @@ app.use('/api/auth', authRouter);
 // narrows that to requirePermission('audit.read') — a permission very few roles
 // should carry, since the log names who did what.
 app.use('/api/audit', auditRouter);
+
+// Module 01 — Patient Registration. Guarded at the mount point: there is no
+// public patient endpoint and there never will be.
+app.use('/api/patients', requireAuth, patientsRouter);
+
+// The reconciliation worklist. Its own path rather than /api/patients/... —
+// it is a queue of work, not a property of any one patient, and modules 03 and
+// 05 will hang their own worklists beside it.
+app.get('/api/worklists/incomplete', requireAuth, worklist);
 
 // API 404 — scoped to /api ONLY.
 //

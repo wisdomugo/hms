@@ -4,20 +4,23 @@
 // and that is the point: separation is the database boundary, not a WHERE
 // clause someone has to remember.
 //
-// Migrations so far:
-//   add_auth   User, Session, LoginThrottle          (milestone 03)
-//   add_audit  AuditEvent                            (milestone 04)
+// Migrations:
+//   add_auth      User, Session, LoginThrottle              (milestone 03)
+//   add_audit     AuditEvent                                (milestone 04)
+//   add_patients  Patient and everything around it          (milestone 05)
 
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
 }
 
-// No `url` here on purpose. The connection string is supplied at runtime by the
-// driver adapter, which is what makes one client per hospital possible.
 datasource db {
   provider = "postgresql"
 }
+
+// ===========================================================================
+// STAFF AND ACCESS
+// ===========================================================================
 
 model User {
   id           Int    @id @default(autoincrement())
@@ -25,34 +28,24 @@ model User {
   passwordHash String
   name         String?
 
-  // PLACEHOLDER. Two string roles is not what a hospital needs — receptionists,
-  // triage nurses, doctors, lab scientists, pharmacists, cashiers, records
-  // officers, HR and a medical director, with permissions varying by department
-  // and ward.
-  //
-  // Milestone 06 replaces this column with Role and Permission tables. The
-  // middleware SHAPE stays as it is; only what it consults changes.
+  // PLACEHOLDER until milestone 06 replaces it with Role and Permission tables.
   role String @default("staff")   // 'owner' | 'staff'
 
-  // Deactivate rather than delete. Staff leave, and their name has to stay
-  // readable on every record they touched — a deleted user makes years of
-  // clinical history say "unknown".
-  //
-  // getSession checks this, so deactivating signs someone out everywhere on
-  // their next request rather than at the end of their session.
+  // Deactivate rather than delete. A deleted user makes years of clinical
+  // history say "unknown". getSession checks this on every request.
   isActive Boolean @default(true)
 
-  sessions    Session[]
-  auditEvents AuditEvent[]
+  sessions           Session[]
+  auditEvents        AuditEvent[]
+  registeredPatients Patient[]      @relation("RegisteredBy")
+  merges             PatientMerge[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Session {
-  // The SHA-256 of the token, never the token itself. Someone who reads a
-  // database dump cannot forge a session from it.
-  id String @id
+  id String @id   // SHA-256 of the token, never the token
 
   userId Int
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -64,11 +57,6 @@ model Session {
   @@index([expiresAt])
 }
 
-// Brute-force brake, in the database rather than in memory.
-//
-// In memory it resets on every restart — an attacker gets a fresh five attempts
-// per deploy — and counts nothing once there is more than one process. Being in
-// the hospital's own database also makes it per-hospital for free.
 model LoginThrottle {
   email       String   @id
   failures    Int      @default(0)
@@ -77,69 +65,332 @@ model LoginThrottle {
   @@index([windowStart])
 }
 
-// ---------------------------------------------------------------------------
-// AUDIT
-//
-// Permissions decide who MAY act. This records who DID.
-//
-// It exists before the module it is for because it is the one thing that cannot
-// be added retrospectively: permissions introduced later work from that day on,
-// but a log introduced later has nothing to say about what came before it.
-//
-// APPEND ONLY. Nothing updates or deletes a row here. The application enforces
-// that by having no route that could — see modules/audit/routes.js. Enforcing
-// it in Postgres properly means a database role holding INSERT and SELECT but
-// not UPDATE or DELETE on this table, and that should be set up before the
-// pilot hospital goes live.
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// AUDIT — append only. See modules/audit/README.md.
+// ===========================================================================
+
 model AuditEvent {
   id Int @id @default(autoincrement())
-
   at DateTime @default(now())
 
-  // Nullable, because not every event has a signed-in actor: a failed login has
-  // none by definition, and neither does a scheduled job.
-  //
-  // SetNull rather than Cascade — deleting a user must never delete the record
-  // of what they did. (Users are deactivated rather than deleted anyway, so
-  // this is a second line of defence.)
-  actorId Int?
-  actor   User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
-
-  // The actor's email AS IT WAS. A snapshot, not a convenience: staff change
-  // their names and leave, and the log has to stay readable years later without
-  // depending on a row that has moved on.
+  actorId    Int?
+  actor      User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
   actorEmail String?
 
-  // What happened: '<area>.<verb>', from ACTIONS in lib/audit.js. Never typed
-  // as a literal at a call site — a typo becomes an event no report ever finds.
-  action String
-
-  // What it happened to. entityId is a STRING because Patient ids are integers
-  // and Tenant ids are cuids, and a log that can only reference one kind of id
-  // stops being written the first time that is inconvenient.
+  action   String
   entity   String?
   entityId String?
-
-  // 'ok' | 'failed' | 'denied'. A refused action is worth recording — often
-  // more than a successful one.
-  outcome String @default("ok")
+  outcome  String  @default("ok")
 
   ip        String?
   userAgent String?
 
-  // Identifiers and field NAMES only. NEVER field values, and never anything
-  // clinical. The audit log is read by more people than the records it
-  // describes, so copying detail into it quietly widens who can see that
-  // detail — and an append-only table is one nobody can correct afterwards.
+  // Identifiers and field NAMES only. Never field values, never anything
+  // clinical.
   meta Json?
 
-  // at            — the log is read newest-first, always
-  // actorId       — "what has this member of staff been doing"
-  // entity+id     — "what has happened to this patient"  ← the investigation query
-  // action        — "show me every merge this month"
   @@index([at])
   @@index([actorId])
   @@index([entity, entityId])
   @@index([action])
+}
+
+// ===========================================================================
+// SETTINGS
+//
+// Key/value with a JSON body, so adding a setting needs no migration and a
+// missing row means "the shipped defaults apply". Carried over from the CMS,
+// where the same reasoning held.
+//
+// First keys: "mrn" { prefix, resetYearly } and "registration" { customFields }.
+// ===========================================================================
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// Atomic counters. One row per sequence, incremented with a single
+// INSERT ... ON CONFLICT DO UPDATE ... RETURNING, so two receptionists
+// registering at the same instant cannot be handed the same number.
+//
+// A Postgres SEQUENCE would also work but cannot be reset per year without
+// DDL, and the MRN resets every January. A row is simpler and does the same
+// job.
+model Counter {
+  key   String @id     // "mrn:2026"
+  value Int    @default(0)
+}
+
+// ===========================================================================
+// PATIENTS
+//
+// THE RULE THAT SHAPES THIS WHOLE SECTION, from the Module 01 workflow
+// document: "No compulsory data validations are enforced; fields may save as
+// null to prevent data fabrication if details are missing or unknown."
+//
+// So almost every column is nullable, INCLUDING the surname. Format is checked
+// when a value is present; presence is never required. Four consequences:
+//
+//   1. No natural key exists, so the MRN is the only identity and it is always
+//      generated by the server.
+//   2. Duplicate detection is ADVISORY, never enforced. Blocking would push
+//      staff into inventing a middle name to get past the screen, which is the
+//      exact fabrication the rule exists to prevent.
+//   3. Incomplete is the NORMAL state, not an error — hence the reconciliation
+//      worklist rather than validation at entry.
+//   4. Searching cannot assume a name exists.
+// ===========================================================================
+
+model Patient {
+  id Int @id @default(autoincrement())
+
+  // The hospital number. Server-generated, permanent, never reused — including
+  // after a merge, where the losing number stays resolvable forever.
+  mrn String @unique
+
+  // The same number with the separators and prefix stripped: "202600042".
+  // A receptionist reading a folder aloud types the digits, not the slashes,
+  // and a search that only matched the display form would be useless.
+  mrnSearch String @unique
+
+  // 'permanent' — a normal registration
+  // 'temporary' — the emergency path: sex and estimated age only, TEMP- number,
+  //               reconciled into a permanent record once the patient is stable
+  identityStatus String @default("permanent")
+
+  // --- Primary (from the workflow document's field table) -----------------
+  surname      String?
+  firstName    String?
+  otherNames   String?
+  sex          String?      // 'female' | 'male' | 'other' | 'unknown'
+  dateOfBirth  DateTime?
+
+  // The emergency path captures an estimate because nobody knows the date of
+  // birth of an unconscious patient. Kept after reconciliation: it records what
+  // was believed at the time, which is the sort of thing an incident review
+  // asks about.
+  estimatedAge Int?
+
+  // --- Contact -----------------------------------------------------------
+  phone    String?
+  altPhone String?
+  email    String?
+  address  String?
+  city     String?
+  state    String?
+
+  // --- Background --------------------------------------------------------
+  nationality   String?
+  stateOfOrigin String?
+  maritalStatus String?
+  occupation    String?
+
+  // --- Clinical base -----------------------------------------------------
+  // Small, stable facts every department needs at a glance. Genotype is here
+  // because it is routinely recorded in Nigerian practice and asked for before
+  // transfusion and in antenatal care.
+  //
+  // Everything else clinical belongs to the EMR module, not to registration.
+  bloodGroup     String?
+  genotype       String?
+  knownAllergies String?
+
+  // Per-hospital custom fields, shaped by the "registration" Setting.
+  //
+  // The ONLY JSON column in the patient core, and deliberately so. Real columns
+  // for anything queried, reported on or billed; JSON only for the tail each
+  // hospital defines for itself.
+  extra Json?
+
+  // --- Provenance --------------------------------------------------------
+  registeredById Int?
+  registeredBy   User? @relation("RegisteredBy", fields: [registeredById], references: [id], onDelete: SetNull)
+  registeredAt   DateTime @default(now())
+
+  // --- Merge -------------------------------------------------------------
+  // Duplicates are merged, never deleted. The losing record stays, pointing at
+  // the survivor, because the paper folder with that number on the cover is
+  // still in the records room.
+  mergedIntoId Int?
+  mergedInto   Patient?  @relation("Merged", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom   Patient[] @relation("Merged")
+
+  // Archive, never destroy.
+  deletedAt DateTime?
+
+  identifiers PatientIdentifier[]
+  kin         NextOfKin[]
+  payers      PatientPayer[]
+  visits      Visit[]
+  attachments PatientAttachment[]
+  mergesWon   PatientMerge[]      @relation("Surviving")
+  mergesLost  PatientMerge[]      @relation("Merged")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Search is by surname, phone or number, so those are indexed. dateOfBirth
+  // and phone carry the duplicate check. identityStatus drives the
+  // reconciliation worklist.
+  @@index([surname])
+  @@index([firstName])
+  @@index([phone])
+  @@index([dateOfBirth])
+  @@index([identityStatus])
+  @@index([deletedAt])
+}
+
+// Every OTHER number a patient carries. A separate table because a patient
+// accumulates them over time, they change, some patients have none — and any
+// one of them is a valid way to search.
+model PatientIdentifier {
+  id Int @id @default(autoincrement())
+
+  patientId Int
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  // 'nin' | 'nhis' | 'hmo' | 'passport' | 'legacy-folder' | 'temp-id'
+  //
+  // temp-id is how an emergency number survives reconciliation: the patient
+  // gets a real MRN, and the TEMP- number moves here so the ER paperwork still
+  // resolves to the right person a week later.
+  type   String
+  value  String
+  issuer String?
+
+  createdAt DateTime @default(now())
+
+  // The same NIN cannot belong to two patients in one hospital. This is the
+  // strongest duplicate check available, because unlike a name it is exact.
+  @@unique([type, value])
+  @@index([patientId])
+  @@index([value])
+}
+
+model NextOfKin {
+  id Int @id @default(autoincrement())
+
+  patientId Int
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  name         String?
+  relationship String?
+  phone        String?
+  address      String?
+
+  isEmergencyContact Boolean @default(true)
+  // The person who accepts the bill. Frequently not the same person, and the
+  // billing module needs to know which is which.
+  isGuarantor        Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+}
+
+// The financial tier the workflow document calls for: Cash, HMO or Corporate.
+// It drives price lists in modules 08 and 16, which is why it is captured at
+// registration rather than at the cash desk.
+model PatientPayer {
+  id Int @id @default(autoincrement())
+
+  patientId Int
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  payerType    String   // 'self' | 'hmo' | 'nhis' | 'corporate'
+  payerName    String?  // "Hygeia HMO", "Dangote Group"
+  policyNumber String?
+  plan         String?
+  validFrom    DateTime?
+  validTo      DateTime?
+  isPrimary    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+}
+
+// Every path in the workflow document ends in creating one of these. It is the
+// seam modules 02, 03 and 04 attach to, so its columns will grow.
+model Visit {
+  id Int @id @default(autoincrement())
+
+  patientId Int
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  visitNumber String @unique
+
+  // 'outpatient' | 'emergency' | 'follow-up' | 'antenatal' ...
+  type String @default("outpatient")
+
+  department String?
+  doctor     String?   // free text until the HR module owns staff records
+
+  // THE SNAPSHOT RULE. Which payer applied on THIS day, copied rather than
+  // referenced. A patient changes HMO next year; this visit must still bill the
+  // way it was billed at the time, and still read correctly in an audit.
+  payerSnapshot Json?
+
+  status   String   @default("open")   // 'open' | 'closed' | 'cancelled'
+  queuedAt DateTime @default(now())
+  closedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([status])
+  @@index([queuedAt])
+}
+
+// Scanned ID cards, referral letters, consent forms, old paper folders.
+// Milestone 05b adds the upload path and closes the cross-tenant /uploads gap.
+model PatientAttachment {
+  id Int @id @default(autoincrement())
+
+  patientId Int
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  kind       String   // 'id-card' | 'referral' | 'consent' | 'old-folder' | 'photo'
+  filename   String
+  storageKey String
+  mimeType   String
+  sizeBytes  Int
+  caption    String?
+
+  uploadedById Int?
+  createdAt    DateTime @default(now())
+
+  @@index([patientId])
+}
+
+// The record of a merge. Duplicate registration is the commonest real problem
+// in a hospital records room, and a merge is irreversible in practice — so who
+// did it, when, and why is not optional.
+model PatientMerge {
+  id Int @id @default(autoincrement())
+
+  survivingId Int
+  surviving   Patient @relation("Surviving", fields: [survivingId], references: [id], onDelete: Cascade)
+
+  mergedId Int
+  merged   Patient @relation("Merged", fields: [mergedId], references: [id], onDelete: Cascade)
+
+  mergedById Int?
+  mergedBy   User? @relation(fields: [mergedById], references: [id], onDelete: SetNull)
+
+  reason String?
+  // What the losing record held, in case the merge was wrong. The only place
+  // in this schema that stores a copy of patient fields, and it exists because
+  // an incorrect merge is otherwise unrecoverable.
+  snapshot Json?
+
+  at DateTime @default(now())
+
+  @@index([survivingId])
+  @@index([mergedId])
 }

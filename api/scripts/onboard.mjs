@@ -9,6 +9,8 @@
  *   --slug          machine name. lowercase letters, digits, single hyphens.
  *   --name          display name.
  *   --host          hostname, or several separated by commas.
+ *   --prefix        optional. The MRN prefix, e.g. STN in STN/2026/00042-7.
+ *                   Defaults to the first three letters of the slug, upper-cased.
  *   --database-url  optional. Use when this hospital's database is not on the
  *                   same server as the control plane — a hospital running on
  *                   its own infrastructure, for instance.
@@ -19,6 +21,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { control } from '../lib/control-plane.js';
+import { getPrisma } from '../lib/tenancy.js';
 import {
   runPrisma, requireControlUrl, withDatabase, dbNameFor,
   arg, SLUG_RE, die
@@ -44,12 +47,23 @@ const hostnames = hostArg
 
 if (hostnames.length === 0) die('--host produced no usable hostnames.');
 
+// The MRN prefix. Derived rather than demanded, because a hospital onboarded
+// in a hurry should still get a sensible number — but overridable, because
+// "STN" reads better than "STN" derived from "stnicholas" always would.
+//
+// It is stored in the hospital's own Setting table, not here: it belongs to the
+// hospital's data, and lib/numbers.js reads it from there on every issue.
+const prefix = (arg('prefix') ?? slug.replace(/[^a-z0-9]/g, '').slice(0, 3))
+  .toUpperCase()
+  .slice(0, 6);
+
 const dbName = dbNameFor(slug);
 const databaseUrl = arg('database-url') ?? withDatabase(controlUrl, dbName);
 
 console.log(`\nOnboarding "${name}"`);
 console.log(`  slug       ${slug}`);
 console.log(`  hostnames  ${hostnames.join(', ')}`);
+console.log(`  MRN prefix ${prefix}      e.g. ${prefix}/${new Date().getFullYear()}/00001-x`);
 console.log(`  database   ${dbName}\n`);
 
 // ---------------------------------------------------------------------------
@@ -116,6 +130,24 @@ if (code !== 0) {
     `Fix the cause, drop it with: DROP DATABASE "${dbName}";  then run this again.`
   );
 }
+
+// ---------------------------------------------------------------------------
+// 3b. Write the hospital's own settings into its own database.
+//
+// The MRN prefix lives with the hospital's data rather than in the control
+// plane, because it is a fact about how that hospital numbers its folders — the
+// same kind of thing as its name on a receipt. lib/numbers.js reads it on every
+// issue, and a missing row simply means the shipped default applies.
+// ---------------------------------------------------------------------------
+console.log(`▸ setting the MRN prefix to ${prefix}`);
+
+const tenantDb = getPrisma({ databaseUrl });
+await tenantDb.setting.upsert({
+  where: { key: 'mrn' },
+  create: { key: 'mrn', value: { prefix, resetYearly: true, pad: 5 } },
+  update: { value: { prefix, resetYearly: true, pad: 5 } }
+});
+await tenantDb.$disconnect();
 
 // ---------------------------------------------------------------------------
 // 4. Register it, then open it.

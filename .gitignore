@@ -12,6 +12,13 @@ generated/
 # by git — see docs/WORKFLOW.md.
 api/uploads/
 
+# curl cookie jars from manual API testing. They hold a live session token —
+# committing one would put a working key to a hospital's data in git history,
+# where it stays even after the file is deleted.
+cookies.txt
+*.cookies
+jar.txt
+
 # Logs and editor noise
 *.log
 npm-debug.log*

@@ -108,8 +108,23 @@ export const ACTIONS = {
   SETUP_COMPLETED: 'auth.setup_completed',
   SETUP_REJECTED: 'auth.setup_rejected',
 
-  // Milestone 05 adds patient.registered, patient.viewed, patient.updated,
-  // patient.merged. patient.viewed is the one that matters most and the one
-  // most systems leave out: reading a record is the commonest way a
-  // confidentiality breach actually happens.
+  // Patients (milestone 05)
+  //
+  // PATIENT_VIEWED is the one that matters most and the one most hospital
+  // systems leave out. Registering and editing get logged everywhere; LOOKING
+  // is how a confidentiality breach actually happens — nobody edits a
+  // neighbour's file, they open it.
+  PATIENT_SEARCHED: 'patient.searched',
+  PATIENT_VIEWED: 'patient.viewed',
+  PATIENT_REGISTERED: 'patient.registered',
+  PATIENT_EMERGENCY: 'patient.emergency_registered',
+  PATIENT_UPDATED: 'patient.updated',
+  PATIENT_RECONCILED: 'patient.reconciled',
+  PATIENT_MERGED: 'patient.merged',
+  VISIT_OPENED: 'visit.opened',
+
+  // Documents. The KIND is recorded, never the caption — a caption is written
+  // by a person and will eventually contain something clinical.
+  PATIENT_ATTACHMENT_ADDED: 'patient.attachment_added',
+  PATIENT_ATTACHMENT_REMOVED: 'patient.attachment_removed'
 };

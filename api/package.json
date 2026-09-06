@@ -24,7 +24,8 @@
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
     "image-size": "^2.0.2",
-    "multer": "^2.2.0"
+    "multer": "^2.2.0",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "dotenv": "^17.4.2",

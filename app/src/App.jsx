@@ -5,31 +5,29 @@ import Setup from './screens/Setup';
 import Home from './screens/Home';
 import Account from './screens/Account';
 import Audit from './screens/Audit';
+import Patients from './screens/Patients';
+import PatientNew from './screens/PatientNew';
+import PatientRecord from './screens/PatientRecord';
+import Worklist from './screens/Worklist';
 
 /*
  * Auth gates the whole shell rather than living behind a /login route.
  *
  * Gating before the router means the URL survives signing in — land on
  * /patients/42, sign in, and you are still on /patients/42 rather than bounced
- * to a dashboard. It also means there is no redirect logic at all. The
- * trade-off is that the login screen has no address of its own, which for a
- * staff application nobody deep-links into is a non-issue.
+ * to a dashboard.
  */
 function Shell() {
   const { user, hospital, checking, needsSetup, unreachable, reason, retry, logout } = useAuth();
 
-  // Prevents a flash of the login card on every page load while /me is in
-  // flight.
   if (checking) {
     return <div className="gate"><p className="gate__wait">Loading…</p></div>;
   }
 
   /*
-   * The API could not be reached, or answered something that makes no sense.
-   *
-   * This must not fall through to the login form. A dead API rendered as a
-   * login screen looks like a working install rejecting your password, so
-   * people try other passwords instead of checking the server.
+   * A dead API must not render as a login screen. That looks like a working
+   * install rejecting your password, so people try other passwords instead of
+   * checking the server.
    */
   if (unreachable) {
     return (
@@ -37,9 +35,7 @@ function Shell() {
         <div className="gate__card">
           <h1 className="gate__title">Can’t reach the API</h1>
           <p className="gate__lede">{reason}</p>
-          <button className="btn btn--primary" type="button" onClick={retry}>
-            Try again
-          </button>
+          <button className="btn btn--primary" type="button" onClick={retry}>Try again</button>
           <p className="gate__foot">
             The app already retried three times before showing this, so a
             transient start-up delay has been ruled out.
@@ -49,14 +45,11 @@ function Shell() {
     );
   }
 
-  // A hospital with no accounts. Offering a login form nobody can satisfy would
-  // be a dead end.
   if (!user && needsSetup) return <Setup />;
-
   if (!user) return <Login />;
 
   // Placeholder until milestone 06. Hiding a link protects nothing — the API
-  // refuses the request either way — it just avoids showing a locked door.
+  // refuses regardless — it just avoids showing a locked door.
   const isOwner = user.role === 'owner';
 
   return (
@@ -69,10 +62,11 @@ function Shell() {
           </div>
 
           <nav className="sidebar__nav" aria-label="Sections">
-            <span className="sidebar__label">Clinical</span>
-            <NavLink to="/">Home</NavLink>
-            {/* Patients and the rest attach here as their modules land.
-                Milestone 05 adds the first. */}
+            <span className="sidebar__label">Records</span>
+            {/* `end` so /patients is not left highlighted while you are on
+                /patients/42. */}
+            <NavLink to="/patients" end>Patients</NavLink>
+            <NavLink to="/worklist">Follow-up list</NavLink>
 
             <span className="sidebar__label">Settings</span>
             <NavLink to="/account">Account</NavLink>
@@ -82,21 +76,23 @@ function Shell() {
           <div className="sidebar__foot">
             <span className="sidebar__who">{user.name || user.email}</span>
             <span className="sidebar__role">{user.role}</span>
-            <button className="btn btn--quiet" type="button" onClick={logout}>
-              Sign out
-            </button>
+            <button className="btn btn--quiet" type="button" onClick={logout}>Sign out</button>
           </div>
         </aside>
 
         <main className="main">
           <Routes>
-            <Route path="/" element={<Home />} />
+            {/* Patients is the landing screen now, not a dashboard. It is where
+                a receptionist starts every single interaction. */}
+            <Route path="/" element={<Navigate to="/patients" replace />} />
+            <Route path="/patients" element={<Patients />} />
+            <Route path="/patients/new" element={<PatientNew />} />
+            <Route path="/patients/:id" element={<PatientRecord />} />
+            <Route path="/worklist" element={<Worklist />} />
+            <Route path="/home" element={<Home />} />
             <Route path="/account" element={<Account />} />
-            {/* Registered only for the owner, so anyone else typing the URL
-                lands on the redirect rather than an empty screen. The API
-                enforces it regardless. */}
             {isOwner && <Route path="/audit" element={<Audit />} />}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/patients" replace />} />
           </Routes>
         </main>
       </div>

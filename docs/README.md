@@ -11,8 +11,10 @@ way, how to reproduce it from scratch, and what went wrong on the way. Named
 | 01 | Scaffold, shared library and verified plumbing | Complete — 2 Sep 2026 |
 | 02 | The tenant seam: control plane, per-hospital databases, fleet scripts | Complete — 2 Sep 2026 |
 | 03 | Authentication end to end | Complete — 2 Sep 2026 |
-| 04 | Roles, permissions and the audit log | Next |
-| 05 | `add_patients` — Module 01, Patient Registration | |
+| 04 | The audit log | Complete — 2 Sep 2026 |
+| 05 | Module 01 — Patient Registration | Complete — 6 Sep 2026 |
+| 06 | Roles, permissions and user management | Next |
+| 07 | Module 02 — Appointments and Scheduling | |
 
 The guides are generated, not hand-formatted — see `_generator/`. From 03
 onward each has a source file there, so a guide can be corrected and

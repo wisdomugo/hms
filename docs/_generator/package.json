@@ -8,9 +8,9 @@
   },
   "scripts": {
     "guide": "node",
-    "all": "node guide-01.cjs && node guide-02.cjs && node guide-03.cjs"
+    "all": "node guide-03.cjs && node guide-04.cjs && node guide-05.cjs"
   },
-  "comment": "The `all` script only works for guides whose source file exists here. Guides 01 and 02 were written before this generator, and their .docx files are committed — they do not need regenerating.",
+  "comment": "The `all` script only covers guides whose source file exists here. Guides 01 and 02 predate this generator and their .docx files are committed — they do not need regenerating. Guide 04 was written retrospectively; see its section 9.",
   "dependencies": {
     "docx": "^9.5.1"
   }
