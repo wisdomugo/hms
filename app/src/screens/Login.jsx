@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import { PRODUCT } from '../lib/brand';
 
 export default function Login() {
   const { login, hospital } = useAuth();
@@ -29,7 +30,7 @@ export default function Login() {
         {/* The hospital's name, from the control plane. On a shared server this
             is how someone knows which hospital they are signing in to — the
             hostname alone is not always obvious on a shared workstation. */}
-        <p className="gate__eyebrow">{hospital ?? 'Hospital Management System'}</p>
+        <p className="gate__eyebrow">{hospital ?? PRODUCT}</p>
         <h1 className="gate__title">Sign in</h1>
 
         <label className="field">

@@ -9,6 +9,9 @@ import Patients from './screens/Patients';
 import PatientNew from './screens/PatientNew';
 import PatientRecord from './screens/PatientRecord';
 import Worklist from './screens/Worklist';
+import Staff from './screens/Staff';
+import ChangePassword from './screens/ChangePassword';
+import { PRODUCT } from './lib/brand';
 
 /*
  * Auth gates the whole shell rather than living behind a /login route.
@@ -48,6 +51,17 @@ function Shell() {
   if (!user && needsSetup) return <Setup />;
   if (!user) return <Login />;
 
+  /*
+   * A password issued by somebody else blocks the whole application, not just
+   * some of it.
+   *
+   * This mirrors the API exactly: requirePasswordCurrent refuses every route
+   * that touches hospital data while the flag is set. Rendering the shell here
+   * would give a signed-in person a sidebar full of screens that all answer
+   * 403 — which reads as a broken system rather than a deliberate stop.
+   */
+  if (user.mustChangePassword) return <ChangePassword />;
+
   // Placeholder until milestone 06. Hiding a link protects nothing — the API
   // refuses regardless — it just avoids showing a locked door.
   const isOwner = user.role === 'owner';
@@ -58,7 +72,11 @@ function Shell() {
         <aside className="sidebar">
           <div className="sidebar__brand">
             <span className="sidebar__hospital">{hospital}</span>
-            <span className="sidebar__system">Hospital Management System</span>
+            {/* The product name, under the hospital's own. One installation
+                serves one hospital, so the hospital's name is the larger of
+                the two — this line says what the thing they are using is
+                called, not what it is. */}
+            <span className="sidebar__system">{PRODUCT}</span>
           </div>
 
           <nav className="sidebar__nav" aria-label="Sections">
@@ -71,6 +89,7 @@ function Shell() {
 
             <span className="sidebar__label">Settings</span>
             <NavLink to="/account">Account</NavLink>
+            {isOwner && <NavLink to="/staff">Staff</NavLink>}
             {isOwner && <NavLink to="/audit">Audit log</NavLink>}
           </nav>
 
@@ -95,6 +114,7 @@ function Shell() {
             {/* The old address, kept so a bookmark from the pilot still works. */}
             <Route path="/home" element={<Navigate to="/" replace />} />
             <Route path="/account" element={<Account />} />
+            {isOwner && <Route path="/staff" element={<Staff />} />}
             {isOwner && <Route path="/audit" element={<Audit />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

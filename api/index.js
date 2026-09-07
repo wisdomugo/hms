@@ -8,12 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { storage } from './lib/storage/index.js';
 import { resolveTenant, appliedMigrationCount, expectedMigrationCount } from './lib/tenancy.js';
 import { serveUpload } from './lib/uploads-route.js';
-import { requireAuth } from './lib/session.js';
+import { requireAuth, requirePasswordCurrent } from './lib/session.js';
 import { controlPlaneStatus } from './lib/control-plane.js';
 
 import authRouter from './modules/auth/routes.js';
 import auditRouter from './modules/audit/routes.js';
 import patientsRouter, { worklist, todaySummary } from './modules/patients/routes.js';
+import usersRouter from './modules/auth/users.js';
 
 /*
  * MILESTONE 03 — the shell, the tenant seam, and authentication.
@@ -139,24 +140,29 @@ app.get('/api/health', async (req, res) => {
 // ---------------------------------------------------------------------------
 app.use('/api/auth', authRouter);
 
+// Staff administration. Owner-only, guarded inside the router. Deliberately
+// NOT behind requirePasswordCurrent: an owner on a temporary password is the
+// person who most needs it.
+app.use('/api/users', usersRouter);
+
 // Read-only, and guarded inside: signed in, then owner-only. Milestone 06
 // narrows that to requirePermission('audit.read') — a permission very few roles
 // should carry, since the log names who did what.
-app.use('/api/audit', auditRouter);
+app.use('/api/audit', requireAuth, requirePasswordCurrent, auditRouter);
 
 // Module 01 — Patient Registration. Guarded at the mount point: there is no
 // public patient endpoint and there never will be.
-app.use('/api/patients', requireAuth, patientsRouter);
+app.use('/api/patients', requireAuth, requirePasswordCurrent, patientsRouter);
 
 // The reconciliation worklist. Its own path rather than /api/patients/... —
 // it is a queue of work, not a property of any one patient, and modules 03 and
 // 05 will hang their own worklists beside it.
-app.get('/api/worklists/incomplete', requireAuth, worklist);
+app.get('/api/worklists/incomplete', requireAuth, requirePasswordCurrent, worklist);
 
 // The landing screen's figures. Its own path rather than under /api/patients
 // because it is about the day, not about a patient, and later modules will add
 // their own counts to it rather than to the patient module.
-app.get('/api/summary/today', requireAuth, todaySummary);
+app.get('/api/summary/today', requireAuth, requirePasswordCurrent, todaySummary);
 
 // API 404 — scoped to /api ONLY.
 //

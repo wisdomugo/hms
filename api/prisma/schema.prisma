@@ -35,6 +35,16 @@ model User {
   // history say "unknown". getSession checks this on every request.
   isActive Boolean @default(true)
 
+  // Set when somebody else issued this account's password: the owner from the
+  // Staff screen, or set-password.mjs over SSH. While it is true the account
+  // can sign in and do exactly one thing — choose a new password.
+  //
+  // It exists because a recovery password has been spoken aloud, over a phone,
+  // to someone who was asked to prove who they are by a colleague who
+  // recognised their voice. That is a reasonable way to get somebody back into
+  // a system, and a terrible password to leave in place afterwards.
+  mustChangePassword Boolean @default(false)
+
   sessions           Session[]
   auditEvents        AuditEvent[]
   registeredPatients Patient[]      @relation("RegisteredBy")

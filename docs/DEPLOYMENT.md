@@ -13,6 +13,7 @@ real patient data goes anywhere near it.
 | TLS | Caddy, automatic certificates — **step 5** |
 | Audit log immutability | Enforced by a database trigger, applied by migration |
 | Access control | **Not built.** Every account can do everything |
+| Password recovery | Owner resets any account from **Staff**; the owner itself is recovered from the server console |
 | Error monitoring | Service logs only |
 
 **Access control is the gap that decides your pilot's shape.** Until milestone
@@ -331,6 +332,28 @@ plane. Check `TenantHostname`.
 
 **A hospital returns 503.** Its status is `onboarding`. Set it to `active` or
 `piloting`.
+
+**Somebody is locked out.** If it is a member of staff, the hospital's owner
+resets them from the **Staff** screen — a temporary password is shown once, and
+they must choose their own the moment they sign in.
+
+If it is the owner, nobody inside the hospital can help, and that is what this
+is for:
+
+```bash
+cd /srv/hms/api
+npm run set-password -- --slug stnicholas --list
+npm run set-password -- --slug stnicholas --email cmd@hospital.ng
+```
+
+It prints a temporary password once, ends every session that account has open,
+and records the reset in that hospital's audit log with no actor — because
+nobody signed in to do it. **Read the password to them over the phone.** SMS and
+email keep a copy long after the call is over.
+
+Before this existed, the only route back into a locked-out owner account was
+`reset-tenant.mjs`, which destroys every patient record on the way. That is not
+an answer anybody should have to give a hospital.
 
 **Restoring.** `npm run restore -- --file <dump> --into <newdb>`. It restores
 and stops; it deliberately does not point the hospital at what it restored.

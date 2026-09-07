@@ -158,27 +158,89 @@ build({
     // =====================================================================
     h1('Step 6 — A hostname'),
 
-    p('The hospital needs a name, not an IP address. For now that is sslip.io, ' +
-      'which is a DNS service that needs no configuration at all: any hostname ' +
-      'ending in sslip.io that contains an IP address resolves to that address.'),
+    p('This is the only step with nothing to click. It is a DECISION, not a ' +
+      'configuration: you work out a name, write it down, and it already ' +
+      'works. Nothing is created in the Google Cloud console or anywhere ' +
+      'else.'),
+
+    h2('Why a name is needed at all, and not just the IP'),
+
+    p('HTTPS certificates are issued to NAMES, never to IP addresses. Caddy ' +
+      'cannot obtain a certificate for 34.77.1.2, however long it tries.'),
+
+    p('And HTTPS cannot be skipped, because the API sets COOKIE_SECURE=true in ' +
+      'production: the browser will only send the session cookie over an ' +
+      'encrypted connection. Without HTTPS, a member of staff can type the ' +
+      'right password, get a valid session back, and still appear logged out ' +
+      'on the very next request.'),
+
+    callout('The chain is: a name gives you a certificate, the certificate ' +
+            'gives you HTTPS, HTTPS lets the session cookie travel, and that ' +
+            'is what lets anyone stay signed in. The hostname is not ' +
+            'cosmetic — it is what makes login work.'),
+
+    h2('What to do'),
+
+    step('Take the static IP you reserved in step 5.', 6),
+    step('Write it with DASHES instead of dots, put the product name in front ' +
+         'and ".sslip.io" after.', 6),
+    step('That string is your hostname. Write it down.', 6),
 
     ...code([
-      '34.77.1.2.sslip.io          ->  34.77.1.2',
-      'hms.34-77-1-2.sslip.io      ->  34.77.1.2',
-      '',
-      '# Both forms work. Dashes are used when you want a prefix in front.'
+      '  the IP Google gave you        the hostname you now have',
+      '  ---------------------        ----------------------------------',
+      '  34.22.168.131          ->    clinisynx.34-22-168-131.sslip.io'
     ]),
 
-    p('No domain to buy, no DNS records to create, and it works the moment the ' +
-      'IP exists. Write down the exact hostname you settle on — you need it ' +
-      'twice later: in the Caddyfile, and as --host when you onboard the ' +
-      'hospital.'),
+    p('That is this deployment\'s actual hostname, verified resolving on ' +
+      '7 September 2026. The prefix is the product name, CliniSynx, rather ' +
+      'than the hospital\'s — every hospital gets its own hostname eventually, ' +
+      'but during the pilot there is one server and the name that matters is ' +
+      'the product\'s.'),
+
+    rich(['You can prove it works before the server even exists. In ',
+          ['cmd.exe'], ', with any IP you like:']),
+
+    ...code([
+      'nslookup clinisynx.34-22-168-131.sslip.io',
+      '',
+      '# answers: 34.22.168.131'
+    ]),
+
+    h2('Why that works with nothing configured'),
+
+    p('sslip.io runs public DNS servers whose entire job is to read an IP ' +
+      'address out of the name being asked about and hand it straight back. ' +
+      'There is no account, no record to create, nothing to sign into. Anyone ' +
+      'can use any IP with it. It exists precisely so that people can have a ' +
+      'working hostname before they own a domain.'),
+
+    p('The dotted form works too — 34.22.168.131.sslip.io — but dashes are ' +
+      'clearer once there is a prefix in front, and easier to read aloud over ' +
+      'a phone.'),
+
+    h2('Where you will use it — three places, all later'),
+
+    table(
+      [3000, 6000],
+      ['Where', 'What it does there'],
+      [
+        ['The Caddyfile', 'The first line of the block. This is what tells Caddy which name to fetch a certificate for.'],
+        ['npm run onboard --host', 'Registers the hostname against the hospital in the control plane. This is what resolveTenant matches an incoming request on.'],
+        ['The staff\'s browser', 'What people actually type. It is also what appears on any printed instruction sheet you give them.'],
+      ]
+    ),
+
+    callout('All three must be the SAME string, character for character. A ' +
+            'certificate for a name the control plane has never heard of ' +
+            'gives you a padlock in front of a 404 — which looks like a ' +
+            'broken application rather than a missing row in a table.'),
 
     h2('The catch, and it is a real one'),
 
-    p('Caddy gets its HTTPS certificate from Let\'s Encrypt, which limits how ' +
-      'many certificates can be issued for a single registered domain. Every ' +
-      'user of sslip.io in the world shares one domain: sslip.io.'),
+    p('Caddy gets its certificate from Let\'s Encrypt, which limits how many ' +
+      'certificates can be issued for a single registered domain. Every user ' +
+      'of sslip.io in the world shares one domain: sslip.io.'),
 
     p('In February 2026 that limit was exhausted, and requests were refused ' +
       'with "too many certificates already issued for sslip.io". When that ' +
@@ -188,14 +250,15 @@ build({
 
     callout('Use sslip.io to get the deployment working and to let the pilot ' +
             'staff in. Move to a hostname on a domain you control BEFORE the ' +
-            'hospital depends on this. A subdomain of a domain you already own ' +
-            'costs nothing and removes the risk completely.'),
+            'hospital depends on this. A subdomain of a domain you already ' +
+            'own — hms.yourdomain.com — costs nothing and removes the risk ' +
+            'completely.'),
 
     p('Changing it later is cheap, which is why starting on sslip.io is ' +
-      'reasonable: the hostname is a row in the control plane. Add the new ' +
-      'hostname, point the DNS at the same IP, add it to the Caddyfile, and ' +
-      'reload. No migration, no downtime, and the old hostname can keep ' +
-      'working alongside the new one for as long as you like.'),
+      'reasonable. The hostname is a row in the control plane: add the new ' +
+      'one, point its DNS at the same IP, add it to the Caddyfile, reload. No ' +
+      'migration and no downtime, and the old hostname can keep working ' +
+      'alongside the new one for as long as you like.'),
 
     spacer(),
 

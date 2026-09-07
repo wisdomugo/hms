@@ -99,7 +99,10 @@ export async function getSession(prisma, token) {
     where: { id: hashToken(token) },
     include: {
       user: {
-        select: { id: true, email: true, name: true, role: true, isActive: true }
+        select: {
+          id: true, email: true, name: true, role: true,
+          isActive: true, mustChangePassword: true
+        }
       }
     }
   });
@@ -180,7 +183,8 @@ export async function requireAuth(req, res, next) {
       id: session.user.id,
       email: session.user.email,
       name: session.user.name,
-      role: session.user.role
+      role: session.user.role,
+      mustChangePassword: session.user.mustChangePassword ?? false
     };
     req.sessionId = session.id;   // so a password change can spare this session
 
@@ -188,6 +192,27 @@ export async function requireAuth(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
+/**
+ * Refuse everything except choosing a new password, while one is owed.
+ *
+ * WHY A SEPARATE MIDDLEWARE rather than a check inside requireAuth: /auth/me
+ * and /auth/password must stay reachable, or the app cannot find out that a
+ * password is owed and cannot let the person pay it. So requireAuth stays a
+ * pure "who are you", and this is mounted on the routers holding hospital data.
+ *
+ * The 403 carries mustChangePassword so a client that has drifted out of step
+ * — a tab left open across a reset, say — shows the password screen rather
+ * than reporting a permissions failure it cannot explain.
+ */
+export function requirePasswordCurrent(req, res, next) {
+  if (!req.user?.mustChangePassword) return next();
+
+  res.status(403).json({
+    error: 'Choose a new password before continuing',
+    mustChangePassword: true
+  });
 }
 
 /*

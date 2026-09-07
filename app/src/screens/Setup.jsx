@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import { PRODUCT } from '../lib/brand';
 
 /*
  * Shown when a hospital has no accounts yet.
@@ -21,7 +22,7 @@ export default function Setup() {
     return (
       <div className="gate">
         <div className="gate__card">
-          <p className="gate__eyebrow">{hospital ?? 'Hospital Management System'}</p>
+          <p className="gate__eyebrow">{hospital ?? PRODUCT}</p>
           <h1 className="gate__title">Setup unavailable</h1>
           <p className="gate__lede">
             This hospital has no accounts, and its setup token has already been
@@ -48,7 +49,7 @@ export default function Setup() {
   return (
     <div className="gate">
       <form className="gate__card" onSubmit={onSubmit}>
-        <p className="gate__eyebrow">{hospital ?? 'Hospital Management System'}</p>
+        <p className="gate__eyebrow">{hospital ?? PRODUCT}</p>
         <h1 className="gate__title">Create the first account</h1>
         <p className="gate__lede">
           This hospital has no accounts yet. The setup token was printed once,

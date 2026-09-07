@@ -108,6 +108,14 @@ export const ACTIONS = {
   SETUP_COMPLETED: 'auth.setup_completed',
   SETUP_REJECTED: 'auth.setup_rejected',
 
+  // Password recovery. PASSWORD_RESET_ISSUED names BOTH people — who issued it
+  // and whose account it was — because "someone gave themselves access to
+  // another account" is exactly the shape of the event this log exists for.
+  // The password itself is never in the meta, obviously.
+  PASSWORD_RESET_ISSUED: 'auth.password_reset_issued',
+  USERS_LISTED: 'auth.users_listed',
+  USER_CREATED: 'auth.user_created',
+
   // Patients (milestone 05)
   //
   // PATIENT_VIEWED is the one that matters most and the one most hospital

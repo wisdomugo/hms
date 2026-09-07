@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { hashPassword, verifyPassword } from '../../lib/password.js';
 import { createSession, destroySession, getSession } from '../../lib/session.js';
 
@@ -75,7 +76,10 @@ export const publicUser = user => ({
   id: user.id,
   email: user.email,
   name: user.name,
-  role: user.role
+  role: user.role,
+  // Drives the forced password screen in the app. Not sensitive: it says the
+  // account must choose a new password, not what the current one is.
+  mustChangePassword: user.mustChangePassword ?? false
 });
 
 /**
@@ -170,7 +174,12 @@ export async function changeOwnPassword(prisma, { userId, sessionId, currentPass
 
   await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash: await hashPassword(newPassword) }
+    data: {
+      passwordHash: await hashPassword(newPassword),
+      // Whatever brought them here, they have now chosen a password nobody
+      // else has heard. This is the only place the flag is cleared.
+      mustChangePassword: false
+    }
   });
 
   const { count } = await prisma.session.deleteMany({
@@ -178,4 +187,150 @@ export async function changeOwnPassword(prisma, { userId, sessionId, currentPass
   });
 
   return { otherSessionsEnded: count };
+}
+
+// ---------------------------------------------------------------------------
+// Password recovery
+//
+// Two callers, one mechanism:
+//
+//   the Staff screen      the owner resets a member of staff who is standing
+//                         in front of them
+//   set-password.mjs      you reset the owner, over SSH, because there is
+//                         nobody in the hospital who can
+//
+// Both issue a TEMPORARY password and set mustChangePassword. Neither can read
+// the old one back, because only a scrypt hash was ever stored.
+// ---------------------------------------------------------------------------
+
+/*
+ * Words, not characters.
+ *
+ * This password gets spoken down a phone line to somebody who is writing it on
+ * a sticky note. "cliff-orbit-9214" survives that journey; "xK9#mP2$vL" does
+ * not, and the failure mode is three phone calls and a person who ends up
+ * choosing "password1" out of exhaustion.
+ *
+ * The list avoids anything that sounds like anything else aloud, and there are
+ * no letters that could be a digit. Two words plus four digits from a list of
+ * 64 is about 34 bits, which is far too weak to leave in place and entirely
+ * adequate for something that must be changed at the next sign-in and cannot
+ * be guessed at more than five times in ten minutes.
+ */
+const WORDS = [
+  'anchor', 'basket', 'candle', 'dolphin', 'ember', 'falcon', 'garden', 'harbour',
+  'island', 'jacket', 'kettle', 'lantern', 'meadow', 'nutmeg', 'orbit', 'pebble',
+  'quiver', 'ribbon', 'saddle', 'timber', 'umbrella', 'velvet', 'walnut', 'yonder',
+  'almond', 'bridge', 'cactus', 'domino', 'engine', 'forest', 'gallop', 'hammer',
+  'indigo', 'jungle', 'kernel', 'ladder', 'mantle', 'noodle', 'oyster', 'parcel',
+  'quarry', 'rocket', 'summit', 'tunnel', 'update', 'vessel', 'window', 'zigzag',
+  'apricot', 'bonfire', 'compass', 'diamond', 'eclipse', 'fossil', 'granite', 'hazel',
+  'iceberg', 'juniper', 'kiwi', 'lagoon', 'marble', 'nectar', 'opal', 'prairie'
+];
+
+export function temporaryPassword() {
+  const pick = () => WORDS[randomInt(WORDS.length)];
+  return `${pick()}-${pick()}-${String(randomInt(10000)).padStart(4, '0')}`;
+}
+
+/**
+ * Issue a temporary password for somebody else's account.
+ *
+ * EVERY session for that user ends, without exception — including the one they
+ * are sitting in front of. A reset is what you do when an account may be in the
+ * wrong hands, so it has to evict whoever is currently holding it. This is the
+ * one difference from changeOwnPassword, which deliberately spares the caller's
+ * own session.
+ *
+ * Returns the plaintext ONCE. It is never stored and cannot be shown again.
+ */
+export async function issueTemporaryPassword(prisma, { userId }) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return { error: 'notfound' };
+
+  const password = temporaryPassword();
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      passwordHash: await hashPassword(password),
+      mustChangePassword: true
+    }
+  });
+
+  const { count } = await prisma.session.deleteMany({ where: { userId } });
+
+  // The throttle is cleared too. Somebody who has just been given a new
+  // password should not meet a lockout earned by the failed attempts that led
+  // to them asking for one.
+  await prisma.loginThrottle.delete({ where: { email: user.email } }).catch(() => {});
+
+  return { user, password, sessionsEnded: count };
+}
+
+export const ROLES = ['owner', 'staff'];
+
+/**
+ * Add an account.
+ *
+ * NO PASSWORD IS CHOSEN HERE, by anybody. The account is created with a
+ * temporary one and mustChangePassword set, exactly as a reset does — so the
+ * owner reads it to the person, and the person chooses their own before they
+ * can do anything at all.
+ *
+ * The alternative — letting the owner type a password for someone else — means
+ * the owner knows a password that the audit log will attribute solely to that
+ * member of staff. In a hospital, where the log is the record of who opened
+ * whose file, that is not a small thing.
+ *
+ * Roles are 'owner' or 'staff' until milestone 07, and a hospital SHOULD have
+ * more than one owner: an owner is the only account that can rescue the others,
+ * so exactly one of them is a single point of failure with a person's memory
+ * attached to it.
+ */
+export async function createUser(prisma, { email, name, role }) {
+  const clean = String(email ?? '').toLowerCase().trim();
+
+  if (!clean || !clean.includes('@')) return { error: 'bad-email' };
+  if (!ROLES.includes(role)) return { error: 'bad-role' };
+
+  const existing = await prisma.user.findUnique({ where: { email: clean } });
+  if (existing) return { error: 'taken' };
+
+  const password = temporaryPassword();
+
+  try {
+    const user = await prisma.user.create({
+      data: {
+        email: clean,
+        name: name?.trim() || null,
+        role,
+        passwordHash: await hashPassword(password),
+        mustChangePassword: true
+      }
+    });
+    return { user, password };
+  } catch (err) {
+    // Two owners adding the same address at once. The unique index is the
+    // thing that actually decides it; the check above only makes the common
+    // case a clean message instead of a constraint violation.
+    if (err?.code === 'P2002') return { error: 'taken' };
+    throw err;
+  }
+}
+
+/**
+ * Every account in this hospital, for the Staff screen.
+ *
+ * No password material of any kind, not even the hash. A list endpoint that
+ * returns hashes is how an offline cracking attempt starts.
+ */
+export async function listUsers(prisma) {
+  return prisma.user.findMany({
+    orderBy: [{ role: 'asc' }, { email: 'asc' }],
+    select: {
+      id: true, email: true, name: true, role: true,
+      isActive: true, mustChangePassword: true, createdAt: true
+    }
+  });
 }
