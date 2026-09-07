@@ -9,8 +9,11 @@
  *   --slug          machine name. lowercase letters, digits, single hyphens.
  *   --name          display name.
  *   --host          hostname, or several separated by commas.
- *   --prefix        optional. The MRN prefix, e.g. STN in STN/2026/00042-7.
- *                   Defaults to the first three letters of the slug, upper-cased.
+ *   --prefix        REQUIRED. The MRN prefix the hospital chooses, e.g. STN in
+ *                   STN/2026/00042-7. Ask them what they want; do not invent
+ *                   one. It is printed on every folder label they will ever
+ *                   make, and changing it afterwards leaves a filing room with
+ *                   two numbering schemes in it.
  *   --database-url  optional. Use when this hospital's database is not on the
  *                   same server as the control plane — a hospital running on
  *                   its own infrastructure, for instance.
@@ -47,15 +50,41 @@ const hostnames = hostArg
 
 if (hostnames.length === 0) die('--host produced no usable hostnames.');
 
-// The MRN prefix. Derived rather than demanded, because a hospital onboarded
-// in a hurry should still get a sensible number — but overridable, because
-// "STN" reads better than "STN" derived from "stnicholas" always would.
+// The MRN prefix. Demanded, not derived.
+//
+// An earlier version of this script cut the first three letters off the slug
+// when --prefix was missing. That was convenient and wrong: the prefix is the
+// hospital's own label for its patient folders, it goes on paper, and a
+// hospital that has been writing "SNH" on folders for twenty years does not
+// want "STN" because the slug happened to start that way. Nobody but the
+// hospital gets to choose it, so onboarding stops until somebody has asked.
 //
 // It is stored in the hospital's own Setting table, not here: it belongs to the
 // hospital's data, and lib/numbers.js reads it from there on every issue.
-const prefix = (arg('prefix') ?? slug.replace(/[^a-z0-9]/g, '').slice(0, 3))
-  .toUpperCase()
-  .slice(0, 6);
+const prefixArg = arg('prefix');
+
+if (!prefixArg) {
+  die(
+    '--prefix is required. Ask the hospital what they want their patient\n' +
+    'numbers to start with, and pass exactly that.\n\n' +
+    '  --prefix SNH        gives  SNH/' + new Date().getFullYear() + '/00001-x\n\n' +
+    'It is printed on every folder label the hospital will ever make, so it\n' +
+    'is theirs to choose, not ours to guess. Changing it later does not\n' +
+    'renumber the patients already registered \u2014 it leaves two numbering\n' +
+    'schemes in one filing room.'
+  );
+}
+
+const prefix = prefixArg.toUpperCase().slice(0, 6);
+
+if (!/^[A-Z0-9-]{2,6}$/.test(prefix)) {
+  die(
+    `--prefix "${prefixArg}" is not usable.\n\n` +
+    'Two to six characters, letters, digits and hyphens only. It ends up in a\n' +
+    'medical record number that gets typed, dictated over a phone and written\n' +
+    'on a folder by hand, so spaces, slashes and punctuation are out.'
+  );
+}
 
 const dbName = dbNameFor(slug);
 const databaseUrl = arg('database-url') ?? withDatabase(controlUrl, dbName);

@@ -50,11 +50,16 @@ model Session {
   userId Int
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  // expiresAt is the ABSOLUTE deadline: a session cannot outlive it however
+  // busy the user is. lastSeenAt drives the idle timeout, which is the one
+  // that actually fires day to day.
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([lastSeenAt])
 }
 
 model LoginThrottle {

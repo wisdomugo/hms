@@ -8,3 +8,8 @@
 
 # Lockfiles are generated; collapse them in diffs.
 package-lock.json linguist-generated=true -diff
+
+# Committed from Windows, run on Linux. CRLF here produces
+# "bad interpreter: /usr/bin/env bash^M", which names the wrong thing.
+scripts/*.sh text eol=lf
+api/scripts/*.sh text eol=lf

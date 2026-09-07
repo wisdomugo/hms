@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client.ts';
 import { findTenantByHost, findTenantBySlug } from './control-plane.js';
@@ -55,17 +56,58 @@ const clients = new Map();
  */
 const CANARY_MODELS = ['user', 'session'];
 
+/*
+ * The same check one level down: a FIELD the client should know about.
+ *
+ * The model check above catches a client generated before a table existed. It
+ * cannot catch the commoner half of the problem — a client that knows Session
+ * perfectly well but has never heard of Session.lastSeenAt, because the schema
+ * gained a column rather than a table. That client passes every check here,
+ * starts cleanly, and then fails on the one query that uses the new field:
+ *
+ *   Unknown argument `lastSeenAt`. Available options are listed in green.
+ *
+ * which arrives at the browser as a bare 500 during login, with the database
+ * entirely up to date and nothing on disk out of place. It happens most often
+ * when the API process was already running while the client was regenerated:
+ * the files on disk are correct, and the process is holding the old ones.
+ *
+ * Add an entry here when a migration adds a field to one of these models. It
+ * is a tripwire, not a validator — one field per model is enough, because a
+ * client that missed one regeneration missed all of it.
+ */
+const CANARY_FIELDS = { session: 'lastSeenAt' };
+
 function assertClientIsCurrent(client) {
   const missing = CANARY_MODELS.filter(name => !client[name]);
-  if (missing.length === 0) return;
 
-  throw new Error(
-    `The generated Prisma client is missing: ${missing.join(', ')}.\n` +
-    'prisma/schema.prisma declares models the client does not know about, ' +
-    'which means it was not regenerated after the schema changed. The database ' +
-    'is almost certainly fine.\n' +
-    'Fix with:  cd api && npm run generate'
-  );
+  if (missing.length > 0) {
+    throw new Error(
+      `The generated Prisma client is missing: ${missing.join(', ')}.\n` +
+      'prisma/schema.prisma declares models the client does not know about, ' +
+      'which means it was not regenerated after the schema changed. The database ' +
+      'is almost certainly fine.\n' +
+      'Fix with:  cd api && npm run generate'
+    );
+  }
+
+  for (const [model, field] of Object.entries(CANARY_FIELDS)) {
+    const known = client[model]?.fields;
+
+    // No `fields` map means this Prisma version does not expose one. Skip
+    // rather than invent a failure: a canary that cries wolf gets deleted.
+    if (!known || field in known) continue;
+
+    throw new Error(
+      `The generated Prisma client's ${model} model has no "${field}" field.\n` +
+      'The client is older than prisma/schema.prisma. The database is almost\n' +
+      'certainly fine; the client simply predates the column.\n\n' +
+      'Fix with:  cd api && npm run generate\n' +
+      'Then STOP the API and start it again. A running process keeps the client\n' +
+      'it loaded at startup, so regenerating underneath it changes nothing until\n' +
+      'it restarts.'
+    );
+  }
 }
 
 export function getPrisma(tenant) {
@@ -190,6 +232,35 @@ export async function resolveTenant(req, res, next) {
  * version, and a migration that failed on one of them leaves a split brain that
  * is otherwise invisible until something breaks.
  */
+/**
+ * How many migrations this CODE ships, counted from the folders on disk.
+ *
+ * Paired with appliedMigrationCount, this is the whole of drift detection: if
+ * the code carries five migrations and a hospital's database has four, that
+ * hospital is one schema change behind the code running against it, and
+ * something is going to fail in a way that names the wrong thing.
+ *
+ * Read once and cached — the folder cannot change while the process runs.
+ */
+let expectedCache = null;
+
+export function expectedMigrationCount() {
+  if (expectedCache !== null) return expectedCache;
+
+  try {
+    const dir = new URL('../prisma/migrations/', import.meta.url);
+    expectedCache = readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .length;
+  } catch {
+    // No migrations folder is a packaging problem, not a schema problem, and
+    // guessing a number here would invent drift that does not exist.
+    expectedCache = null;
+  }
+
+  return expectedCache;
+}
+
 export async function appliedMigrationCount(prisma) {
   try {
     const rows = await prisma.$queryRaw`

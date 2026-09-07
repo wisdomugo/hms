@@ -63,6 +63,7 @@ function Shell() {
 
           <nav className="sidebar__nav" aria-label="Sections">
             <span className="sidebar__label">Records</span>
+            <NavLink to="/" end>Today</NavLink>
             {/* `end` so /patients is not left highlighted while you are on
                 /patients/42. */}
             <NavLink to="/patients" end>Patients</NavLink>
@@ -82,17 +83,20 @@ function Shell() {
 
         <main className="main">
           <Routes>
-            {/* Patients is the landing screen now, not a dashboard. It is where
-                a receptionist starts every single interaction. */}
-            <Route path="/" element={<Navigate to="/patients" replace />} />
+            {/* Today is the landing screen. Not a dashboard of charts — the
+                day's outstanding work, plus the same search box, because an
+                emergency file with no name on it is a person waiting somewhere
+                and a search box never mentions them. */}
+            <Route path="/" element={<Home />} />
             <Route path="/patients" element={<Patients />} />
             <Route path="/patients/new" element={<PatientNew />} />
             <Route path="/patients/:id" element={<PatientRecord />} />
             <Route path="/worklist" element={<Worklist />} />
-            <Route path="/home" element={<Home />} />
+            {/* The old address, kept so a bookmark from the pilot still works. */}
+            <Route path="/home" element={<Navigate to="/" replace />} />
             <Route path="/account" element={<Account />} />
             {isOwner && <Route path="/audit" element={<Audit />} />}
-            <Route path="*" element={<Navigate to="/patients" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
       </div>

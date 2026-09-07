@@ -1,5 +1,19 @@
 # docs
 
+## Deployment
+
+[DEPLOYMENT.md](DEPLOYMENT.md) — from a bare VM to a hospital signing in, and
+what has to be true before real patient data goes near it. Read the readiness
+table at the top before deploying anything.
+
+## Working on Windows
+
+[WINDOWS.md](WINDOWS.md) — the four shell differences that have actually cost
+time on this project: single quotes are not quotes in `cmd.exe`, `psql`
+connects as your Windows user, `VAR=value command` does not exist, and line
+endings in `.sh` files. Read it before running any verification command copied
+from a Unix source.
+
 ## Developer guides — one per milestone
 
 A record of what was built at each milestone, why the decisions were made that
@@ -13,8 +27,9 @@ way, how to reproduce it from scratch, and what went wrong on the way. Named
 | 03 | Authentication end to end | Complete — 2 Sep 2026 |
 | 04 | The audit log | Complete — 2 Sep 2026 |
 | 05 | Module 01 — Patient Registration | Complete — 6 Sep 2026 |
-| 06 | Roles, permissions and user management | Next |
-| 07 | Module 02 — Appointments and Scheduling | |
+| 06 | Deployment readiness — backups, TLS, deploy, audit immutability | Complete — 6 Sep 2026 |
+| 07 | Roles, permissions and user management | Next |
+| 08 | Module 02 — Appointments and Scheduling | |
 
 The guides are generated, not hand-formatted — see `_generator/`. From 03
 onward each has a source file there, so a guide can be corrected and

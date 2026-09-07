@@ -436,3 +436,51 @@ body {
 @media (max-width: 46rem) {
   .row--2, .row--3 { grid-template-columns: 1fr; }
 }
+
+/* ---------- today: the landing screen's tiles ----------
+ *
+ * auto-fit rather than a fixed four columns, so the row reflows to two-up on a
+ * laptop and one-up on the phone a doctor is actually holding, without a media
+ * query per breakpoint.
+ */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: .75rem;
+  margin: 0 0 1.75rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  padding: 1rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.stat__n {
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat__label { font-size: .84rem; color: var(--muted); }
+.stat__note  { font-size: .74rem; color: var(--faint); margin-top: .2rem; }
+
+.stat--link { cursor: pointer; }
+.stat--link:hover { border-color: var(--accent); }
+
+/* Only when the number is not zero. A tile permanently tinted red is a tile
+ * nobody sees any more. */
+.stat--alert {
+  background: var(--bad-soft);
+  border-color: #e7c9b8;
+}
+.stat--alert .stat__n { color: var(--bad); }
+.stat--alert:hover { border-color: var(--bad); }

@@ -14,7 +14,11 @@
     "control:generate": "prisma generate --schema prisma/control/schema.prisma",
     "onboard": "node scripts/onboard.mjs",
     "migrate:all": "node scripts/migrate-all.mjs",
-    "generate": "prisma generate --schema prisma/schema.prisma && prisma generate --schema prisma/control/schema.prisma"
+    "generate": "prisma generate --schema prisma/schema.prisma && prisma generate --schema prisma/control/schema.prisma",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs",
+    "reset": "node scripts/reset-tenant.mjs",
+    "fleet": "node scripts/fleet.mjs"
   },
   "author": "Wisdom Nukas",
   "license": "UNLICENSED",

@@ -6,14 +6,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { storage } from './lib/storage/index.js';
-import { resolveTenant, appliedMigrationCount } from './lib/tenancy.js';
+import { resolveTenant, appliedMigrationCount, expectedMigrationCount } from './lib/tenancy.js';
 import { serveUpload } from './lib/uploads-route.js';
 import { requireAuth } from './lib/session.js';
 import { controlPlaneStatus } from './lib/control-plane.js';
 
 import authRouter from './modules/auth/routes.js';
 import auditRouter from './modules/audit/routes.js';
-import patientsRouter, { worklist } from './modules/patients/routes.js';
+import patientsRouter, { worklist, todaySummary } from './modules/patients/routes.js';
 
 /*
  * MILESTONE 03 — the shell, the tenant seam, and authentication.
@@ -120,7 +120,10 @@ app.get('/api/health', async (req, res) => {
     env: process.env.NODE_ENV ?? 'development',
     commit: process.env.GIT_COMMIT ?? null,
     tenant: req.tenant,
-    migrations: await appliedMigrationCount(req.prisma)
+    migrations: {
+      applied: await appliedMigrationCount(req.prisma),
+      expected: expectedMigrationCount()
+    }
   });
 });
 
@@ -149,6 +152,11 @@ app.use('/api/patients', requireAuth, patientsRouter);
 // it is a queue of work, not a property of any one patient, and modules 03 and
 // 05 will hang their own worklists beside it.
 app.get('/api/worklists/incomplete', requireAuth, worklist);
+
+// The landing screen's figures. Its own path rather than under /api/patients
+// because it is about the day, not about a patient, and later modules will add
+// their own counts to it rather than to the patient module.
+app.get('/api/summary/today', requireAuth, todaySummary);
 
 // API 404 — scoped to /api ONLY.
 //
@@ -193,6 +201,38 @@ app.use((err, req, res, next) => {
     return res.status(415).json({ error: err.message });
   }
   next(err);
+});
+
+// ---------------------------------------------------------------------------
+// A DATABASE THAT IS BEHIND THE CODE.
+//
+// Prisma raises P2021 (no such table) and P2022 (no such column) when the
+// generated client knows about something the database has not been given yet.
+// It means one thing and one thing only: a migration has not been applied to
+// this hospital.
+//
+// Without this, that arrives as a bare 500 and "Internal server error" — the
+// same shape as a null dereference, a bad query, or anything else. It is the
+// database twin of the stale-client problem in lib/tenancy.js, and it deserves
+// the same treatment: say what happened and name the command that fixes it.
+// ---------------------------------------------------------------------------
+app.use((err, req, res, next) => {
+  if (err?.code !== 'P2021' && err?.code !== 'P2022') return next(err);
+
+  const missing = err.meta?.column ?? err.meta?.table ?? 'something';
+  const who = req.tenant?.slug ?? 'this hospital';
+
+  console.error(
+    `\n  ${who}'s database is behind the code.\n` +
+    `  Prisma ${err.code}: ${missing} does not exist there, but the generated\n` +
+    `  client expects it. A migration has not been applied.\n\n` +
+    `  Fix with:  cd api && npm run migrate:all\n`
+  );
+
+  res.status(500).json({
+    error: 'This hospital\'s database is behind the running code',
+    detail: `${missing} is missing. Run: npm run migrate:all`
+  });
 });
 
 app.use((err, req, res, next) => {

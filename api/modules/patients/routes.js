@@ -157,6 +157,26 @@ export async function worklist(req, res, next) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/summary/today — mounted separately in index.js
+//
+// NOT audited, and deliberately.
+//
+// It runs once on every sign-in and every return to the landing screen, and it
+// reads nobody's record — only counts, plus the same list of the day's
+// registrations that the patient list already shows. Logging it would add a row
+// per page load to a log whose whole value is that every row in it means
+// something. Opening any of the patients it lists IS audited, at the point the
+// record is actually read.
+// ---------------------------------------------------------------------------
+export async function todaySummary(req, res, next) {
+  try {
+    res.json(await patients.todaySummary(req.prisma));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/patients/:id
 // ---------------------------------------------------------------------------
 router.get('/:id', async (req, res, next) => {

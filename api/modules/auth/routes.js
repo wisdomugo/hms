@@ -79,7 +79,22 @@ router.post('/login', async (req, res, next) => {
         meta: { email: key }
       });
 
-      return res.status(401).json({ error: 'Invalid email or password' });
+      /*
+       * The hospital's NAME is returned alongside the refusal, and it leaks
+       * nothing: the caller chose the hostname that selected this hospital,
+       * and /api/auth/status already reports the same name without a session.
+       *
+       * It is here because of a real hour lost to this. Signing in against the
+       * wrong hostname resolves to a DIFFERENT HOSPITAL, whose database has
+       * never heard of your account — and the honest answer to that is
+       * "invalid email or password", which sends you off checking your
+       * password instead of your address bar. Saying which hospital just
+       * refused you turns that into a glance.
+       */
+      return res.status(401).json({
+        error: 'Invalid email or password',
+        hospital: req.tenant.name
+      });
     }
 
     await auth.clearFailures(req.prisma, key);

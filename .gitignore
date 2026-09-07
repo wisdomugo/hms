@@ -8,6 +8,13 @@ generated/
 .env.local
 *.local
 
+# Database dumps. A backup in git history is a full copy of a hospital's
+# patient records, permanently, readable by anyone who can clone the repo —
+# and deleting the file later does not remove it from history.
+backups/
+*.sql.gz
+*.dump
+
 # Uploaded files are the hospital's data, not source code. They never travel
 # by git — see docs/WORKFLOW.md.
 api/uploads/

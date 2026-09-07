@@ -364,6 +364,97 @@ export async function incompleteWorklist(prisma, { take = 50, skip = 0 } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// The day's summary
+//
+// What the landing screen shows. Four counts and the last few registrations,
+// answered in one round trip so the first screen after signing in does not
+// stutter through five requests.
+// ---------------------------------------------------------------------------
+
+/*
+ * WHERE "TODAY" BEGINS.
+ *
+ * Not at the server's midnight. A VM in a European or American region runs on
+ * UTC, so a hospital in Lagos (UTC+1) would watch its day roll over at 1am
+ * — the night shift's registrations landing under tomorrow's date, and the
+ * morning's count starting an hour late. The kind of wrongness nobody reports
+ * as a bug; they just stop trusting the number.
+ *
+ * So the boundary is computed in the hospital's own timezone. One setting per
+ * server for now, which is correct while every hospital is in one country.
+ * When a hospital outside Nigeria signs up this moves into that hospital's
+ * own Setting table, beside the MRN prefix, where it belongs.
+ */
+const HOSPITAL_TZ = process.env.HOSPITAL_TZ || 'Africa/Lagos';
+
+export function startOfDayIn(timeZone, now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hourCycle: 'h23',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).formatToParts(now);
+
+  const at = type => Number(parts.find(part => part.type === type)?.value ?? 0);
+
+  // How far into the local day we are, subtracted from the current instant.
+  // Going through the wall clock rather than a fixed offset means a timezone
+  // that observes daylight saving stays correct without special-casing.
+  const secondsIntoDay = at('hour') * 3600 + at('minute') * 60 + at('second');
+
+  return new Date(now.getTime() - secondsIntoDay * 1000);
+}
+
+export async function todaySummary(prisma, { now = new Date(), take = 8 } = {}) {
+  const since = startOfDayIn(HOSPITAL_TZ, now);
+
+  // Merged-away and deleted records are excluded everywhere, so a duplicate
+  // cleaned up this morning stops being counted the moment it is merged.
+  const live = { deletedAt: null, mergedIntoId: null };
+
+  const [registeredToday, visitsToday, awaitingReconciliation, incompleteRecords, recent] =
+    await Promise.all([
+      prisma.patient.count({ where: { ...live, registeredAt: { gte: since } } }),
+
+      prisma.visit.count({ where: { queuedAt: { gte: since } } }),
+
+      // Emergency registrations still carrying a temporary identity. These are
+      // the ones with a real person attached and no name yet, so they are the
+      // most urgent thing on the screen.
+      prisma.patient.count({ where: { ...live, identityStatus: 'temporary' } }),
+
+      // Permanent records missing a surname or a date of birth. Worth chasing,
+      // but nobody is waiting on them, so they are counted separately from the
+      // temporary ones rather than lumped into one "incomplete" number.
+      prisma.patient.count({
+        where: {
+          ...live,
+          identityStatus: { not: 'temporary' },
+          OR: [{ surname: null }, { dateOfBirth: null }]
+        }
+      }),
+
+      prisma.patient.findMany({
+        where: { ...live, registeredAt: { gte: since } },
+        orderBy: { registeredAt: 'desc' },
+        take: Math.min(take, 25),
+        select: summarySelect
+      })
+    ]);
+
+  return {
+    since,
+    timeZone: HOSPITAL_TZ,
+    registeredToday,
+    visitsToday,
+    awaitingReconciliation,
+    incompleteRecords,
+    recent
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Merge
 //
 // Duplicate registration is the commonest real problem in a records room, and

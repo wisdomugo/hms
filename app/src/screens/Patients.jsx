@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { api, fullName, age, shortDate } from '../lib/api';
 
 /*
@@ -18,7 +18,10 @@ import { api, fullName, age, shortDate } from '../lib/api';
 export default function Patients() {
   const navigate = useNavigate();
 
-  const [q, setQ] = useState('');
+  // Seeded from ?q= so the search box on the Today screen can hand over here
+  // with the term already in it. One search implementation, two ways in.
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(() => params.get('q') ?? '');
   const [state, setState] = useState({ status: 'idle' });
   const [emergencyBusy, setEmergencyBusy] = useState(false);
   const [error, setError] = useState(null);

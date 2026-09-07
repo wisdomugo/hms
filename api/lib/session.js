@@ -18,14 +18,39 @@ import { randomBytes, createHash } from 'node:crypto';
 export const COOKIE_NAME = 'hms_session';
 
 /*
- * CHANGE 1 — lifetime.
+ * CHANGE 1 — lifetime, and it is idle-based rather than a fixed clock.
  *
  * A fixed seven days suits a CMS one person signs into from their own laptop.
- * It is wrong for a ward computer three nurses share across a shift change, so
- * this is hours and it comes from the environment.
+ * A fixed twelve hours, which this used to be, is not much better for a ward:
+ * it logs out the clerk who is mid-registration at hour twelve, and it leaves
+ * the computer at the nurses' station signed in all afternoon after whoever
+ * opened it went home.
+ *
+ * So there are two limits, and they answer different questions:
+ *
+ *   IDLE   — how long an UNUSED session survives. This is the one that fires in
+ *            practice. A busy person never meets it; an abandoned screen always
+ *            does.
+ *   MAX    — the absolute ceiling, regardless of activity. Without it a session
+ *            kept warm by a browser tab polling in the background would live
+ *            forever, which is the hole idle timeouts are famous for.
  */
-const SESSION_HOURS = Number(process.env.SESSION_HOURS || 12);
-const SESSION_MS = SESSION_HOURS * 60 * 60 * 1000;
+const IDLE_MINUTES = Number(process.env.SESSION_IDLE_MINUTES || 120);
+const IDLE_MS = IDLE_MINUTES * 60 * 1000;
+
+const MAX_HOURS = Number(process.env.SESSION_MAX_HOURS || 24);
+const MAX_MS = MAX_HOURS * 60 * 60 * 1000;
+
+/*
+ * How stale lastSeenAt is allowed to get before we write it again.
+ *
+ * Stamping it on literally every request would put a database write on the
+ * read path of every page load — the same cost the deactivated-account check
+ * below deliberately refuses to pay. Writing at most once a minute makes the
+ * idle timeout accurate to within a minute, which for a two-hour window is
+ * accuracy nobody can perceive, at a fraction of the writes.
+ */
+const TOUCH_AFTER_MS = 60 * 1000;
 
 const hashToken = token => createHash('sha256').update(token).digest('hex');
 
@@ -36,7 +61,11 @@ export function cookieOptions() {
     secure: process.env.COOKIE_SECURE === 'true',
     domain: process.env.COOKIE_DOMAIN || undefined,
     path: '/',
-    maxAge: SESSION_MS
+    // The absolute ceiling, not the idle window. The cookie cannot slide itself
+    // and the server is the thing that decides whether a session is still
+    // alive, so a cookie that outlives its session is harmless — it is
+    // presented, rejected, and cleared.
+    maxAge: MAX_MS
   };
 }
 
@@ -56,7 +85,8 @@ export async function createSession(prisma, userId) {
     data: {
       id: hashToken(token),
       userId,
-      expiresAt: new Date(Date.now() + SESSION_MS)
+      expiresAt: new Date(Date.now() + MAX_MS),
+      lastSeenAt: new Date()
     }
   });
   return token;
@@ -76,9 +106,40 @@ export async function getSession(prisma, token) {
 
   if (!session) return null;
 
-  if (session.expiresAt < new Date()) {
+  const now = Date.now();
+
+  // The absolute ceiling.
+  if (session.expiresAt.getTime() < now) {
     await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
     return null;
+  }
+
+  /*
+   * The idle window — the limit that actually fires.
+   *
+   * The row is deleted rather than left to expire, because unlike the ceiling
+   * this one is reached while the person is still holding a valid-looking
+   * cookie, and the next request should not have to work it out again.
+   */
+  const idleFor = now - session.lastSeenAt.getTime();
+
+  if (idleFor > IDLE_MS) {
+    await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
+    return null;
+  }
+
+  /*
+   * Stamp it, but not on every request. See TOUCH_AFTER_MS above.
+   *
+   * Not awaited: the value being written is already reflected in the decision
+   * this request just made, so nothing downstream reads it, and making every
+   * page load wait for a write to land would defeat the point of throttling it.
+   * A failure here costs at most one minute of idle accuracy.
+   */
+  if (idleFor > TOUCH_AFTER_MS) {
+    prisma.session
+      .update({ where: { id: session.id }, data: { lastSeenAt: new Date(now) } })
+      .catch(() => {});
   }
 
   /*
@@ -86,7 +147,7 @@ export async function getSession(prisma, token) {
    *
    * Checked on every request rather than only at login. Staff leave, and when
    * someone is deactivated the expectation is that they lose access now, not
-   * whenever their twelve-hour session happens to expire.
+   * whenever their session happens to fall idle.
    *
    * The session row is left in place: it will expire on its own, and deleting
    * it here would mean a read path doing writes on every request.
