@@ -24,6 +24,21 @@ node guide-03.cjs    # writes ../DEV_GUIDE_03 - Milestone - ....docx
 The `.docx` files ARE committed. This folder exists so they can be corrected and
 regenerated, not because anyone has to run it to read them.
 
+## The task list
+
+`tasks.cjs` is the odd one out. It writes `TASKS.docx` to the repository root,
+and that document is **gitignored**:
+
+```bash
+cd docs/_generator
+npm run tasks        # writes ../../TASKS.docx
+```
+
+The guides are a record and belong in history. The task list is a scratchpad
+that changes on almost every working session, and a binary file that churns
+makes every diff useless. So the generator is tracked and the document is not
+— the list stays reproducible without the noise.
+
 ## Writing a new guide
 
 Copy the newest `guide-NN.cjs` and replace its body. Everything comes from
@@ -41,7 +56,17 @@ Copy the newest `guide-NN.cjs` and replace its body. Everything comes from
 | `spacer()` | breathing room between a table and what follows |
 
 `build({ number, title, standfirst, filename, children })` assembles it and
-writes to `docs/`.
+writes to `docs/`. Three optional keys exist for documents that are not
+milestone guides, and `tasks.cjs` is the only thing using them: `eyebrow` and
+`titlePrefix` replace the "DEVELOPER GUIDE N" / "Milestone:" masthead text, and
+`outDir` (relative to this folder) sends the file somewhere other than `docs/`
+— `'../..'` is the repository root.
+
+`step(text, instance)` takes an optional second argument. Omit it and every
+numbered step in the document shares one running sequence, which is what a
+guide wants. Pass a different number per section when a document has several
+independent step lists, or the second section's first step comes out numbered
+five.
 
 ## What a guide is for
 

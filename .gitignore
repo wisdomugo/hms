@@ -34,3 +34,12 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# The working task list. Regenerate it with:
+#   cd docs/_generator && node tasks.cjs
+#
+# Deliberately untracked: it changes on almost every working session, it is a
+# scratchpad rather than a record, and a binary file that churns makes every
+# diff useless. The GENERATOR is tracked, so the list is reproducible even
+# though the document is not.
+TASKS.docx

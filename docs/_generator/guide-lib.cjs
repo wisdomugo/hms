@@ -47,8 +47,17 @@ const bullet = (text) => new Paragraph({
   children: [new TextRun({ text, size: 21, color: INK, font: 'Calibri' })]
 });
 
-const step = (text) => new Paragraph({
-  numbering: { reference: 'steps', level: 0 },
+/*
+ * A numbered step.
+ *
+ * `instance` starts a fresh 1, 2, 3 — pass a different number per section in a
+ * document with several independent step lists, or the count runs on and the
+ * second section's first step is numbered 5. Omit it and every step in the
+ * document shares one continuous sequence, which is what the milestone guides
+ * want.
+ */
+const step = (text, instance) => new Paragraph({
+  numbering: { reference: 'steps', level: 0, instance },
   spacing: { after: 80, line: 276 },
   children: [new TextRun({ text, size: 21, color: INK, font: 'Calibri' })]
 });
@@ -129,20 +138,26 @@ function table(widths, header, rows) {
   });
 }
 
-/** The masthead every guide opens with. */
-function masthead({ number, title, standfirst }) {
+/**
+ * The masthead every guide opens with.
+ *
+ * `eyebrow` and `titlePrefix` are overridable so this library can also set
+ * documents that are not milestone guides — the task list, for one — without
+ * either duplicating the house style or mislabelling them "DEVELOPER GUIDE".
+ */
+function masthead({ number, title, standfirst, eyebrow, titlePrefix }) {
   return [
     new Paragraph({
       spacing: { after: 60 },
       children: [new TextRun({
-        text: `HOSPITAL MANAGEMENT SYSTEM  ·  DEVELOPER GUIDE ${number}`,
+        text: eyebrow ?? `HOSPITAL MANAGEMENT SYSTEM  ·  DEVELOPER GUIDE ${number}`,
         bold: true, size: 16, color: ACCENT, font: 'Calibri', characterSpacing: 30
       })]
     }),
     new Paragraph({
       spacing: { after: 100 },
       children: [new TextRun({
-        text: `Milestone: ${title}`,
+        text: `${titlePrefix ?? 'Milestone: '}${title}`,
         bold: true, size: 34, color: INK, font: 'Calibri'
       })]
     }),
@@ -154,12 +169,17 @@ function masthead({ number, title, standfirst }) {
   ];
 }
 
-/** Build and write. `filename` is the .docx name, written to docs/. */
-function build({ number, title, standfirst, filename, children }) {
+/**
+ * Build and write.
+ *
+ * `filename` is the .docx name. It lands in docs/ by default; pass `outDir`
+ * (relative to this folder) to put it elsewhere — '../..' is the repo root.
+ */
+function build({ number, title, standfirst, filename, children, eyebrow, titlePrefix, outDir, docTitle, docDescription }) {
   const doc = new Document({
     creator: 'Wisdom Nukas',
-    title: `DEV_GUIDE_${number} — Milestone — ${title}`,
-    description: `Hospital Management System — record of build milestone ${number}.`,
+    title: docTitle ?? `DEV_GUIDE_${number} — Milestone — ${title}`,
+    description: docDescription ?? `Hospital Management System — record of build milestone ${number}.`,
     numbering: {
       config: [
         {
@@ -183,11 +203,11 @@ function build({ number, title, standfirst, filename, children }) {
     styles: { default: { document: { run: { font: 'Calibri', size: 21, color: INK } } } },
     sections: [{
       properties: { page: { margin: { top: 1200, bottom: 1200, left: 1440, right: 1440 } } },
-      children: [...masthead({ number, title, standfirst }), ...children]
+      children: [...masthead({ number, title, standfirst, eyebrow, titlePrefix }), ...children]
     }]
   });
 
-  const out = path.join(__dirname, '..', filename);
+  const out = path.join(__dirname, outDir ?? '..', filename);
   return Packer.toBuffer(doc).then(buf => {
     fs.writeFileSync(out, buf);
     console.log(`written: ${filename}  (${buf.length} bytes)`);
