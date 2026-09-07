@@ -14,6 +14,21 @@ connects as your Windows user, `VAR=value command` does not exist, and line
 endings in `.sh` files. Read it before running any verification command copied
 from a Unix source.
 
+## Deployment guides — one per stage of getting it running
+
+Where the DEV_GUIDE series records what was BUILT, these record how it gets
+RUN. Named `DEPLOYMENT_GUIDE_NN - <what it covers>.docx`, generated the same
+way, and committed like the milestone guides.
+
+| Guide | Covers | Status |
+|---|---|---|
+| 01 | A Linux server on Google Cloud — e2-medium, europe-west1, static IP, hostname | Complete — 7 Sep 2026 |
+| 02 | The server itself: Postgres, Node, Caddy, systemd, backups | Covered for now by [DEPLOYMENT.md](DEPLOYMENT.md) |
+
+`DEPLOYMENT.md` is the reference — terse, and the thing you reread on the
+fifth deployment. `DEPLOYMENT_GUIDE_01` is the walkthrough, with the reasoning
+and the traps, for the first one.
+
 ## Developer guides — one per milestone
 
 A record of what was built at each milestone, why the decisions were made that

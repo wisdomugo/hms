@@ -43,3 +43,9 @@ Thumbs.db
 # diff useless. The GENERATOR is tracked, so the list is reproducible even
 # though the document is not.
 TASKS.docx
+
+# Microsoft Office lock files. Word writes ~$Whatever.docx beside a document
+# while it is open, and deletes it on close. One got committed on 7 Sep 2026
+# because TASKS.docx was open in Word during a `git add -A` — the document
+# itself is ignored, but the lock file was not.
+~$*

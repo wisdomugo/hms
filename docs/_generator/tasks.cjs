@@ -54,13 +54,41 @@ build({
     // =====================================================================
     h1('2.  Before the pilot hospital sees a real patient'),
 
-    h2('2.1  Choose the region by measuring, not by the map'),
-    p('Johannesburg is closer to Lagos than London is, and that does not settle ' +
-      'it. African internet traffic frequently routes through Europe, so London ' +
-      'can be the faster of the two from a Nigerian connection. It can also go ' +
-      'the other way: Google\'s own Equiano subsea cable lands in Lagos and runs ' +
-      'to South Africa, which would favour Johannesburg. Neither can be reasoned ' +
-      'out from here.'),
+    h2('2.1  Region — MEASURED 7 September 2026'),
+    p('Measured with gcping.com from Wisdom\'s connection in Lagos. The map ' +
+      'was misleading and the measurement settled it: Johannesburg is far ' +
+      'closer geographically and roughly 280ms WORSE, because the traffic ' +
+      'reaches South Africa by going north through Europe first.'),
+    table(
+      [3400, 2800, 2800],
+      ['Region', 'Median latency', 'e2-medium / month'],
+      [
+        ['Milan (europe-west8)', '327 ms', '$28.37'],
+        ['Belgium (europe-west1)', '377 ms  ← recommended', '$26.91'],
+        ['London (europe-west2)', '416 ms', '$31.51'],
+        ['Frankfurt (europe-west3)', '444 ms', '$31.51'],
+        ['Johannesburg (africa-south1)', '661 ms', '$26.91'],
+        ['Iowa (us-central1)', '877 ms', '$24.46'],
+      ]
+    ),
+    p('Belgium is the recommendation: cheapest of the credible options and ' +
+      'within 50ms of the fastest. Milan measured better, but that is one ' +
+      'noisy sample — Taiwan also came in ahead of Frankfurt in the same run, ' +
+      'which cannot be real. Belgium sits in a consistent cluster with London ' +
+      'and Frankfurt.'),
+    callout('The absolute numbers are high across the board, which means the ' +
+            'connection was busy. The RANKING is the reliable part, not the ' +
+            'milliseconds. Still to do: re-run gcping.com from the HOSPITAL\'S ' +
+            'connection before committing. Europe-beats-Johannesburg will not ' +
+            'change; the ordering within Europe might.'),
+
+    h2('2.1b  The reasoning, kept for when this is revisited'),
+    p('Why this could not be reasoned out in advance: African internet traffic ' +
+      'frequently routes through Europe, which favours London. But Google\'s ' +
+      'own Equiano subsea cable lands in Lagos and runs to South Africa, which ' +
+      'would have favoured Johannesburg. Both were plausible; only one was ' +
+      'true. Measure again rather than reasoning again if this is ever ' +
+      'reopened.'),
     step('Open gcping.com — it pings every Google Cloud region from the browser ' +
          'and ranks them.', 2),
     step('Run it from the HOSPITAL\'S internet connection, not yours. Their ' +
@@ -74,7 +102,7 @@ build({
       [
         ['Machine type', 'e2-medium — 2 vCPU, 4 GB. Do NOT repeat the 1 GB free-tier shape: the swap-file step in GUIDE_22 Part A exists only because a Vite build gets OOM-killed on 1 GB, and this box runs PostgreSQL as well.'],
         ['Disk', '50 GB balanced persistent disk. You are off the free tier anyway, so there is no reason to accept the slow standard disk.'],
-        ['Region', 'Whatever section 2.1 measured. Roughly $27/month in Johannesburg, $31 in London, plus about $5 for the disk.'],
+        ['Region', 'europe-west1 (Belgium) on the measurement in section 2.1 — $26.91/month, plus about $5 for the disk. Confirm against a run from the hospital\'s own connection first.'],
         ['Billing', 'Find the exact $300 credit expiry under Billing → Credits. At ~$32/month the 90 days expire long before the money does, so the comparison you want will come from the monthly bill.'],
         ['Budget alert', 'Set one at $50 so nothing surprises you.'],
         ['Existing CMS', 'Unaffected. Always-free and the trial credit are separate things; adding a paid instance does not cost you the free e2-micro.'],

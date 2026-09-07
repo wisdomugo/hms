@@ -9,7 +9,8 @@
   "scripts": {
     "guide": "node",
     "all": "node guide-03.cjs && node guide-04.cjs && node guide-05.cjs",
-    "tasks": "node tasks.cjs"
+    "tasks": "node tasks.cjs",
+    "deployment-01": "node deployment-guide-01.cjs"
   },
   "comment": "The `all` script only covers guides whose source file exists here. Guides 01 and 02 predate this generator and their .docx files are committed \u2014 they do not need regenerating. Guide 04 was written retrospectively; see its section 9.",
   "dependencies": {
