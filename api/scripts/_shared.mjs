@@ -62,9 +62,41 @@ export function withDatabase(url, dbName) {
   return parsed.toString();
 }
 
-/** hms_stnicholas — Postgres identifiers cannot contain hyphens unquoted. */
+/**
+ * clinisynx_stnicholas_db — the name of one hospital's database.
+ *
+ * Hyphens become underscores because a Postgres identifier containing a hyphen
+ * has to be quoted everywhere it appears, forever, and one place that forgets
+ * is a bug that only shows up for hospitals whose slug happens to have one.
+ *
+ * The shared prefix is the point: `psql -l | grep clinisynx` shows the whole
+ * system and nothing else on a machine that may be running other things.
+ *
+ * CHANGING THIS AFTER A HOSPITAL IS ONBOARDED DOES NOTHING to that hospital.
+ * Its full connection URL is stored in the control plane at onboarding, so it
+ * keeps using the name it was created with; only newly onboarded hospitals get
+ * the new shape. That is a feature — it means renaming here can never orphan a
+ * live database — but it does mean a rename leaves the fleet in two shapes
+ * until every hospital has been re-onboarded.
+ */
 export function dbNameFor(slug) {
-  return `hms_${slug.replace(/-/g, '_')}`;
+  const name = `clinisynx_${slug.replace(/-/g, '_')}_db`;
+
+  // Postgres truncates identifiers at 63 bytes SILENTLY, with only a notice.
+  // Two hospitals with long, similar slugs would truncate to the same name and
+  // the second onboarding would attach itself to the first one's database.
+  // Refusing here is the difference between a clear error and a catastrophe.
+  if (name.length > 63) {
+    throw new Error(
+      `The database name for slug "${slug}" would be ${name.length} characters:\n` +
+      `  ${name}\n` +
+      'Postgres truncates identifiers at 63 and does not fail when it does, so\n' +
+      'two long similar slugs can silently end up sharing one database.\n' +
+      `Use a shorter slug: at most ${63 - 'clinisynx__db'.length} characters.`
+    );
+  }
+
+  return name;
 }
 
 /** Read --name value / --name=value from argv. */
