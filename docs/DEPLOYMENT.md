@@ -111,12 +111,19 @@ sudo -u postgres psql -l | grep clinisynx   # clinisynx_controldb, owned by clin
 First, a Linux account for the API to run as:
 
 ```bash
-sudo adduser --system --group --home /srv/hms --shell /usr/sbin/nologin clinisynx
+sudo adduser --system --group --no-create-home --home /srv/hms \
+             --shell /usr/sbin/nologin clinisynx
 ```
 
 `--system` means no password and no expiry; `--shell /usr/sbin/nologin` means
-nobody can sign in as it, ever. **This is the account the API runs as, and it is
-not you.** If the API is ever compromised, the attacker becomes an account that
+nobody can sign in as it, ever. `--no-create-home` matters more than it looks:
+without it `adduser` creates `/srv/hms` itself and may drop template files in
+it, and `git clone` refuses to clone into a directory that is not empty — an
+error about the destination that says nothing about the account you just made.
+The directory gets created in the next step instead, deliberately empty.
+
+**This is the account the API runs as, and it is not you.** If the API is ever
+compromised, the attacker becomes an account that
 can read `/srv/hms` and reach the database — not one that can `sudo` to root.
 Running a public-facing service as your own login account hands an attacker
 everything you can do.
@@ -147,6 +154,30 @@ sudo chmod -R g+rX /srv/hms
 `api/uploads` holds scanned ID cards and referral letters — hospital data, written
 by the running API. `g+rX` lets the `clinisynx` group read the code and enter its
 directories without being able to change anything.
+
+### npm will report vulnerabilities. Do not fix them here.
+
+Every `npm ci` ends with a line like `5 high severity vulnerabilities`. **Never
+run `npm audit fix` on the server**, and never `--force` anywhere without
+testing afterwards.
+
+`npm audit fix` rewrites `package.json` and `package-lock.json`. Deploys are
+`git pull` then `npm ci`, and `npm ci` installs exactly what the COMMITTED
+lockfile says — so a fix applied here survives until the next deploy and is
+then silently reverted, while the server and the repository quietly disagree in
+the meantime. `--force` additionally accepts major version upgrades regardless
+of whether the code still works with them.
+
+First find out whether any of it is real:
+
+```bash
+npm audit --omit=dev
+```
+
+Development packages are not installed on this machine, so an advisory in a test
+runner or a build tool cannot be reached by anything. `found 0 vulnerabilities`
+here means the whole list was noise. Anything that remains gets fixed in the
+repository, tested, committed, and deployed like any other change.
 
 > **If npm reports that install scripts were skipped**, Prisma's `postinstall`
 > did not run and Prisma will fail at *runtime* rather than at install. The
